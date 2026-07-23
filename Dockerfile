@@ -1,4 +1,4 @@
-FROM docker.io/denoland/deno:bin-2.9.2 AS deno
+FROM docker.io/denoland/deno:bin-2.9.4 AS deno
 FROM docker.io/python:3.14.6-slim-trixie
 
 RUN apt update && apt install ffmpeg -y
