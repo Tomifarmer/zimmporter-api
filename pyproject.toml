@@ -1,0 +1,65 @@
+[project]
+name = "zimmporter-master"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.14"
+dependencies = [
+    "celery[redis]>=5.3,<6.0",
+    "emoji==2.15.0",
+    "fastapi>=0.110,<1.0",
+    "minio>=7.2.20",
+    "mutagen>=1.48.1",
+    "pydantic>=2.0,<3.0",
+    "pymysql>=1.1",
+    "requests>=2.34.2",
+    "sqlalchemy>=2.0,<3.0",
+    "uvicorn[standard]>=0.29,<1.0",
+    "yt-dlp>=2026.7.4",
+    "yt-dlp-ejs>=0.8.0",
+    "ytmusicapi>=1.12.1",
+]
+
+[tool.ruff]
+
+# Longueur de ligne (88 = défaut de Black)
+line-length = 120
+
+# Dossiers à ignorer
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Règles à activer
+select = [
+    "E",      # Erreurs de style pycodestyle
+    "F",      # Erreurs Pyflakes (variables non utilisées, etc.)
+    "I",      # Tri des imports (isort)
+    "B",      # Bugs potentiels (flake8-bugbear)
+    "UP",     # Modernisation syntaxe (pyupgrade)
+    "SIM",    # Simplifications possibles
+]
+
+# Règles à ignorer
+ignore = [
+    "E501",   # Ligne trop longue (géré par le formatter)
+]
+
+# Règles que --fix peut corriger automatiquement
+fixable = ["ALL"]
+
+[tool.ruff.format]
+# Style des guillemets (comme Black)
+quote-style = "double"
+
+# Indentation (comme Black)
+indent-style = "space"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.21",
+]

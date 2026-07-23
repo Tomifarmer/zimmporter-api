@@ -1,0 +1,86 @@
+---
+
+services:
+  valkey:
+    image: valkey/valkey:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mariadb:
+    image: mariadb:11
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=zimmporter
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - CELERY_BROKER=redis://valkey:6379/0
+      - CELERY_BACKEND=redis://valkey:6379/1
+      - DB_HOST=mariadb
+      - DB_USER=root
+      - DB_PASS=root
+      - DB_NAME=zimmporter
+      - MINIO_ACCESS_KEY=test
+      - MINIO_SECRET_KEY=test123456789
+      - MINIO_ENDPOINT=192.168.2.250:9000 # host:port
+      - MINIO_USE_SSL=false
+      - MINIO_BUCKET=test
+      - REQUIRE_AUTH=false
+    volumes:
+      - zimmer_data:/data/zimmer/importer
+    depends_on:
+      valkey:
+        condition: service_healthy
+      mariadb:
+        condition: service_healthy
+    command: ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    build: .
+    environment:
+      - PYTHONWARNINGS=ignore::celery.platforms.SecurityWarning
+      - CELERY_BROKER=redis://valkey:6379/0
+      - CELERY_BACKEND=redis://valkey:6379/1
+      - DB_HOST=mariadb
+      - DB_USER=root
+      - DB_PASS=root
+      - DB_NAME=zimmporter
+      - MINIO_ACCESS_KEY=test
+      - MINIO_SECRET_KEY=test123456789
+      - MINIO_ENDPOINT=192.168.2.250:9000 # host:port
+      - MINIO_USE_SSL=false
+      - MINIO_BUCKET=test
+    volumes:
+      - zimmer_data:/data/zimmer/importer
+    depends_on:
+      valkey:
+        condition: service_healthy
+      mariadb:
+        condition: service_healthy
+    command: ["celery", "-A", "tasks.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--pool=prefork"]
+
+volumes:
+  valkey_data:
+  mariadb_data:
+  zimmer_data:
