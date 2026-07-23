@@ -7,7 +7,7 @@ per-album concurrency.
 
 Module-level :data:`YTDL_OPTS` holds the global yt-dlp configuration.
 Because state is lost after a ``billiard.Pool`` fork, ``logger`` and
-``progress_hooks`` are re-initialised in each worker via
+``progress_hooks`` are re-initialized in each worker via
 :meth:`Zimmporter.init_logger`.
 """
 
