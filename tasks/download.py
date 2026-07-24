@@ -38,6 +38,8 @@ from zimmporter.cert import get_ca_cert
 from zimmporter.core import Zimmporter, temp_dir
 from zimmporter.ytdlp_logger import YTDLPLogger
 
+logger = logging.getLogger(__name__)
+
 BATCH_SIZE = 2
 
 
@@ -137,6 +139,12 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                 existing_titles = {
                     row[0] for row in session.query(Song.title).filter(Song.job_id == self.request.id).all()
                 }
+                successful_titles = {
+                    row[0]
+                    for row in session.query(Song.title)
+                    .filter(Song.job_id == self.request.id, Song.status == "success")
+                    .all()
+                }
                 songs_rows = [
                     Song(
                         job_id=self.request.id,
@@ -165,7 +173,8 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                     album_name=album_name,
                     artist=artist,
                 )
-            to_download = [(song, album_data, artist, thumbnail_path) for song in tracks]
+            to_download = [(song, album_data, artist, thumbnail_path) for song in tracks if song["title"] not in successful_titles]
+            total_tracks = len(to_download)
 
             zimm.yt = None
             with ThreadPoolExecutor(max_workers=concurrent) as executor:
@@ -280,8 +289,13 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
             playlist_data = zimm.yt.get_playlist(id)
             album_name = playlist_data["title"]
             to_download = list()
+            unavailable = list()
 
             for song in playlist_data["tracks"]:
+                if song.get("videoId") is None:
+                    logger.warning("Skipping song with None videoId: %s", song.get("title", "Unknown"))
+                    unavailable.append(song)
+                    continue
                 title = song["title"]
                 thumbnail_url = song["thumbnails"][-1]["url"]
                 thumbnail_path = f"{temp_dir}playlists/{album_name}/{title}/cover.jpg"
@@ -298,6 +312,12 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                 existing_titles = {
                     row[0] for row in session.query(Song.title).filter(Song.job_id == self.request.id).all()
                 }
+                successful_titles = {
+                    row[0]
+                    for row in session.query(Song.title)
+                    .filter(Song.job_id == self.request.id, Song.status == "success")
+                    .all()
+                }
                 songs_rows = [
                     Song(
                         job_id=self.request.id,
@@ -310,8 +330,22 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                     for song, _, _, _ in to_download
                     if song["title"] not in existing_titles
                 ]
+                unavailable_rows = [
+                    Song(
+                        job_id=self.request.id,
+                        title=song["title"],
+                        artist="playlists",
+                        album=album_name,
+                        track_number=None,
+                        status="unavailable",
+                    )
+                    for song in unavailable
+                    if song["title"] not in existing_titles
+                ]
                 if songs_rows:
                     session.add_all(songs_rows)
+                if unavailable_rows:
+                    session.add_all(unavailable_rows)
                 _update_job(
                     session,
                     self.request.id,
@@ -324,6 +358,9 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                     total_songs=total_tracks,
                     album_name=album_name,
                 )
+
+            to_download = [(song, playlist_data, artist, thumb) for song, playlist_data, artist, thumb in to_download if song["title"] not in successful_titles]
+            total_tracks = len(to_download)
 
             zimm.yt = None
             with ThreadPoolExecutor(max_workers=concurrent) as executor:
