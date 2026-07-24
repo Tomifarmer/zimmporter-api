@@ -28,7 +28,7 @@ class YTDLPLogger:
         self.extra_logging = {"song": "", "album": ""}
 
         formatter = logging.Formatter(
-            fmt="[%(album)s/%(song)s] [%(asctime)s,%(msecs)03dZ] [%(levelname)s/%(name)s] %(message)s",
+            fmt="[%(asctime)s,%(msecs)03dZ] [%(levelname)s/%(name)s] [%(album)s/%(song)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
         formatter.converter = time.gmtime

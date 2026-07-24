@@ -14,6 +14,7 @@ Because state is lost after a ``billiard.Pool`` fork, ``logger`` and
 import logging
 import os
 import shutil
+import threading
 import time
 
 import requests
@@ -174,6 +175,7 @@ class Zimmporter:
                         "title": result["title"],
                         "author": result.get("author", ""),
                         "thumbnail": thumbnail_url,
+                        "trackCount": result.get("itemCount"),
                     }
                 )
 
@@ -455,14 +457,14 @@ class Zimmporter:
     @staticmethod
     def _download_album_song_task(song, album, artist, thumbnail_path):
         """Pool-compatible wrapper for :meth:`download_album_song`."""
-        return Zimmporter.download_album_song(song, album, artist, thumbnail_path, thread_id=os.getpid()) or {
+        return Zimmporter.download_album_song(song, album, artist, thumbnail_path, thread_id=threading.get_ident()) or {
             "title": song["title"]
         }
 
     @staticmethod
     def _download_playlist_song_task(song, album, artist, thumbnail_path):
         """Pool-compatible wrapper for :meth:`download_playlist_song`."""
-        return Zimmporter.download_playlist_song(song, album, artist, thumbnail_path, thread_id=os.getpid()) or {
+        return Zimmporter.download_playlist_song(song, album, artist, thumbnail_path, thread_id=threading.get_ident()) or {
             "title": song["title"]
         }
 

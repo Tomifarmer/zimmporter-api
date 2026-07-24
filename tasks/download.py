@@ -291,20 +291,19 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
             to_download = list()
             unavailable = list()
 
+            playlist_thumb_url = playlist_data["thumbnails"][-1]["url"]
+            cover_dir = f"{temp_dir}playlists/{album_name}"
+            cover_path = f"{cover_dir}/cover.jpg"
+            os.makedirs(cover_dir, exist_ok=True)
+            with open(cover_path, "wb") as f:
+                f.write(requests.get(playlist_thumb_url, verify=get_ca_cert()).content)
+
             for song in playlist_data["tracks"]:
                 if song.get("videoId") is None:
                     logger.warning("Skipping song with None videoId: %s", song.get("title", "Unknown"))
                     unavailable.append(song)
                     continue
-                title = song["title"]
-                thumbnail_url = song["thumbnails"][-1]["url"]
-                thumbnail_path = f"{temp_dir}playlists/{album_name}/{title}/cover.jpg"
-                os.makedirs(f"{temp_dir}playlists/{album_name}/{title}", exist_ok=True)
-
-                with open(thumbnail_path, "wb") as f:
-                    f.write(requests.get(thumbnail_url, verify=get_ca_cert()).content)
-
-                to_download.append((song, playlist_data, "playlists", thumbnail_path))
+                to_download.append((song, playlist_data, "playlists", cover_path))
 
             total_tracks = len(to_download)
 

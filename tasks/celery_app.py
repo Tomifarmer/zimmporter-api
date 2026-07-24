@@ -39,5 +39,6 @@ celery_app.conf.update(
     task_track_started=True,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    worker_redirect_stdouts=False,
     include=["tasks.download"],
 )
