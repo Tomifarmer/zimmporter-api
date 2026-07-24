@@ -39,7 +39,7 @@ def search(
         :class:`SearchResponse` with a list of structured result dicts.
     """
     filter_value = "community_playlists" if type == "playlists" else "albums"
-    cache_key = f"search:{q}:{filter_value}"
+    cache_key = f"search:{q}:{filter_value}:{limit}"
     r = _get_redis()
 
     cached = r.get(cache_key)

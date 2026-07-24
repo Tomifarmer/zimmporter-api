@@ -7,9 +7,10 @@ pagination via ``limit`` and ``offset`` query parameters.
 
 from fastapi import APIRouter, HTTPException
 
-from api.models import JobStatusResponse
+from api.models import JobResponse, JobStatusResponse
 from db.engine import get_session
 from db.models import Job, Song
+from tasks.download import download_album, download_playlist
 
 jobs_router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -103,3 +104,46 @@ def list_jobs(limit: int = 50, offset: int = 0) -> list[JobStatusResponse]:
             results.append(JobStatusResponse(**_build_response(job, songs)))
 
     return results
+
+
+@jobs_router.post("/{job_id}/retry", response_model=JobResponse)
+def retry_job(job_id: int) -> JobResponse:
+    """Reset failed songs in a job and re-queue it.
+
+    Finds all songs with status ``failed`` for the given job, resets
+    them to ``pending`` (clearing the error), and dispatches the
+    original download task again.
+
+    Args:
+        job_id: Database primary key of the job to retry.
+
+    Returns:
+        The ``job_id`` with the new status ``"running"``.
+
+    Raises:
+        HTTPException: 404 if the job does not exist.
+        HTTPException: 400 if the job has no failed songs to retry.
+    """
+    with get_session() as session:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        failed_songs = session.query(Song).filter(Song.job_id == job_id, Song.status == "failed").all()
+        if not failed_songs:
+            raise HTTPException(status_code=400, detail="No failed songs to retry")
+
+        for song in failed_songs:
+            song.status = "pending"
+            song.error = None
+
+        job_type = job.job_type
+        browse_id = job.browse_id
+        job.status = "running"
+        job.message = "Retrying failed songs"
+        session.commit()
+
+    task = download_album if job_type == "album" else download_playlist
+    task.apply_async(args=[browse_id], kwargs={"concurrent": 4}, task_id=str(job_id))
+
+    return JobResponse(job_id=job_id, status="running")

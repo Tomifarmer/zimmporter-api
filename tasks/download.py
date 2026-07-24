@@ -23,6 +23,7 @@ The ``_init_worker`` initializer re-creates the :class:`YTDLPLogger` in
 each forked child because logger state is lost after ``os.fork()``.
 """
 
+import logging
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -44,6 +45,7 @@ BATCH_SIZE = 2
 def _init_worker() -> None:
     """Re-initialize yt-dlp logger in each forked pool child."""
     YTDLPLogger()
+    logging.getLogger("yt_dlp").setLevel(logging.ERROR)
 
 
 def _update_job(session, job_id: int, **kwargs) -> None:
@@ -132,6 +134,9 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
             total_tracks = len(tracks)
 
             with get_session() as session:
+                existing_titles = {
+                    row[0] for row in session.query(Song.title).filter(Song.job_id == self.request.id).all()
+                }
                 songs_rows = [
                     Song(
                         job_id=self.request.id,
@@ -143,8 +148,10 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                         release_date=release_date,
                     )
                     for song in tracks
+                    if song["title"] not in existing_titles
                 ]
-                session.add_all(songs_rows)
+                if songs_rows:
+                    session.add_all(songs_rows)
                 _update_job(
                     session,
                     self.request.id,
@@ -288,6 +295,9 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
             total_tracks = len(to_download)
 
             with get_session() as session:
+                existing_titles = {
+                    row[0] for row in session.query(Song.title).filter(Song.job_id == self.request.id).all()
+                }
                 songs_rows = [
                     Song(
                         job_id=self.request.id,
@@ -298,8 +308,10 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                         status="pending",
                     )
                     for song, _, _, _ in to_download
+                    if song["title"] not in existing_titles
                 ]
-                session.add_all(songs_rows)
+                if songs_rows:
+                    session.add_all(songs_rows)
                 _update_job(
                     session,
                     self.request.id,

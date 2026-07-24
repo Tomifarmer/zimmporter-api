@@ -62,8 +62,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app.add_middleware(AuthMiddleware)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "*"),
@@ -71,6 +69,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(AuthMiddleware)
 
 
 @app.on_event("startup")
