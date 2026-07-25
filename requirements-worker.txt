@@ -1,0 +1,5 @@
+-r requirements-base.txt
+boto3>=1.34.0
+mutagen>=1.48.1
+yt-dlp>=2026.7.4
+yt-dlp-ejs>=0.8.0

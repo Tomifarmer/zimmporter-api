@@ -1,13 +1,4 @@
-celery[redis]>=5.3,<6.0
-emoji==2.15.0
+-r requirements-base.txt
 fastapi>=0.110,<1.0
-pymysql>=1.1
-boto3>=1.34.0
-mutagen>=1.48.1
 pydantic>=2.0,<3.0
-requests>=2.34.2
-sqlalchemy>=2.0,<3.0
 uvicorn[standard]>=0.29,<1.0
-yt-dlp>=2026.07.4
-ytmusicapi>=1.12.1
-yt-dlp-ejs>=0.8.0

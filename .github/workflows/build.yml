@@ -23,17 +23,20 @@ jobs:
       - run: uv sync --frozen
       - run: uv run python -m pytest tests/ -v
 
-  api:
+  build:
     needs: [test]
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        target: [api, worker]
         variant: [alpine, debian]
     steps:
       - uses: actions/checkout@v7
 
-      - name: Lowercase repo
-        run: echo "REPO_LOWER=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Set build metadata
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "REPO_LOWER=${OWNER}/zimmporter-${{ matrix.target }}" >> "$GITHUB_ENV"
 
       - name: Docker metadata
         id: meta
@@ -60,7 +63,12 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ${{ matrix.variant == 'alpine' && 'Dockerfile.alpine' || 'Dockerfile' }}
+          file: ${{
+            (matrix.target == 'api' && matrix.variant == 'alpine') && 'Dockerfile.alpine' ||
+            (matrix.target == 'api' && matrix.variant == 'debian') && 'Dockerfile' ||
+            (matrix.target == 'worker' && matrix.variant == 'alpine') && 'Dockerfile.worker.alpine' ||
+            'Dockerfile.worker'
+          }}
           push: ${{ github.event_name != 'pull_request' }}
           load: true
           tags: ${{ steps.meta.outputs.tags }}
