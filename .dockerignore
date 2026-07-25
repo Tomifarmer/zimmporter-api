@@ -5,7 +5,18 @@
 __pycache__/
 venv*/
 .venv/*
-.env
+.env*
 
 # Editors
 .idea/
+
+# Not needed in image
+Dockerfile
+docker-compose.yml
+*.md
+tests/
+docs/
+.pytest_cache/
+.ruff_cache/
+.gitignore
+e2e_test.sh

@@ -1,28 +1,29 @@
 FROM docker.io/denoland/deno:bin-2.9.4 AS deno
 FROM docker.io/python:3.14.6-slim-trixie
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /usr/local/bin/uv
 
-RUN apt update && apt install ffmpeg -y && \
+RUN apt update && apt install --no-install-recommends ffmpeg -y && \
+    rm -rf /var/lib/apt/lists/* && \
     groupadd -r zimmporter -g 51000 && \
-    useradd -r -g zimmporter -u 51000 -d /zimmer zimmporter
+    useradd -r -g zimmporter -u 51000 -d /zimmer zimmporter && \
+    mkdir -p /etc/ssl/certs /data/zimmer/importer
 
-RUN mkdir -p /etc/ssl/certs
 COPY --from=deno /deno /usr/local/bin/deno
 
 WORKDIR /zimmer/
 
 COPY requirements.txt .
-RUN uv pip install --system -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 COPY zimmporter/ ./zimmporter/
 COPY api/ ./api/
 COPY tasks/ ./tasks/
 COPY db/ ./db/
 
-RUN mkdir -p /data/zimmer/importer && chown -R 51000:51000 /zimmer /data/zimmer
+RUN chown -R 51000:51000 /zimmer /data/zimmer
 
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
 USER 51000
 
