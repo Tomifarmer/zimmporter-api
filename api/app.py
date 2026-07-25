@@ -25,7 +25,9 @@ from db.models import Song
 from tasks.celery_app import celery_app
 from zimmporter.cert import configure_ssl
 
-app = FastAPI(title="Zimmporter API", version="1.0.0")
+from zimmporter import __version__
+
+app = FastAPI(title="Zimmporter API", version=__version__)
 app.include_router(search_router)
 app.include_router(download_router)
 app.include_router(jobs_router)

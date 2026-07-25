@@ -39,6 +39,15 @@ jobs:
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
           echo "REPO_LOWER=${OWNER}/zimmporter-${{ matrix.target }}" >> "$GITHUB_ENV"
 
+      - name: Inject version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          cat > zimmporter/_version.py <<EOF
+          __version__ = "$VERSION"
+          EOF
+          sed -i "s/dynamic = \[\\\"version\\\"\]/version = \"$VERSION\"/" pyproject.toml
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v6
