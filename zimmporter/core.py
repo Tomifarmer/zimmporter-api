@@ -228,7 +228,7 @@ class Zimmporter:
                 with Pool(concurrent) as p:
                     p.starmap(self.download_playlist_song, to_download)
 
-                shutil.rmtree(f"{temp_dir}{artist}", ignore_errors=True)
+                shutil.rmtree(f"{temp_dir}playlists/{album_name}", ignore_errors=True)
 
         if album:
             for id in ids.split(","):
@@ -252,7 +252,7 @@ class Zimmporter:
                 with Pool(concurrent) as p:
                     p.starmap(self.download_album_song, to_download)
 
-                shutil.rmtree(f"{temp_dir}{artist}", ignore_errors=True)
+                shutil.rmtree(f"{temp_dir}{artist}/{album_name}", ignore_errors=True)
 
     @staticmethod
     def _build_s3_path(artist: str, album: str, title: str, ext: str = "m4a") -> str:

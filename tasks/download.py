@@ -231,7 +231,7 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                             )
                     session.commit()
 
-            shutil.rmtree(f"{temp_dir}{artist}", ignore_errors=True)
+            shutil.rmtree(f"{temp_dir}{artist}/{album_name}", ignore_errors=True)
 
         with get_session() as session:
             _update_job(
@@ -421,7 +421,7 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                     session.commit()
 
             artist = "playlists"
-            shutil.rmtree(f"{temp_dir}{artist}", ignore_errors=True)
+            shutil.rmtree(f"{temp_dir}playlists/{album_name}", ignore_errors=True)
 
         with get_session() as session:
             _update_job(
