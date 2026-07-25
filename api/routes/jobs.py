@@ -16,7 +16,7 @@ jobs_router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 def _build_response(job: Job, songs: list) -> dict:
-    """Convert a :class:`db.models.Job` and its :class:`db.models.Song`\ s into a response model.
+    """Convert a :class:`db.models.Job` and its :class:`db.models.Song`\'s into a response model.
 
     Args:
         job: Database Job row.

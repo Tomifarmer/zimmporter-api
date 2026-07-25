@@ -201,6 +201,7 @@ class Zimmporter:
             pickling the YTMusic HTTP client across forks.
         """
         from billiard import Pool
+
         if not album and not playlist:
             return
 
