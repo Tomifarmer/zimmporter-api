@@ -82,22 +82,12 @@ class UploadToS3(PostProcessor):
         self.metadata = metadata
 
     def run(self, info: dict) -> tuple[list, dict]:
-        """Upload the file to S3 and delete the local copy.
-
-        The object key follows the pattern
-        ``artist/album/title.ext`` with ``/`` replaced by ``-``.
-        After a successful upload the local file at ``info["filepath"]``
-        is removed.
-
-        Args:
-            info: yt-dlp info dict containing ``filepath`` and ``ext``.
-
-        Returns:
-            Tuple of (empty list, info dict) as required by yt-dlp.
-        """
         artist = self.metadata["artist"].replace("/", "-")
         album = self.metadata["album"].replace("/", "-")
+        track = self.metadata.get("tracknumber")
         song = self.metadata["title"].replace("/", "-")
+        if track:
+            song = f"{int(track):02d} - {song}"
 
         s3_path = f"{artist}/{album}/{song}.{info['ext']}"
 

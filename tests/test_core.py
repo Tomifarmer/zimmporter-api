@@ -153,7 +153,7 @@ class TestDownloadAlbumSong:
         assert result["album"] == "Album"
         assert result["track_number"] == 1
         assert result["status"] == "success"
-        assert result["s3_path"] == "Artist/Album/Track One.m4a"
+        assert result["s3_path"] == "Artist/Album/01 - Track One.m4a"
         assert result["error"] is None
 
     def test_returns_error_on_failure(self, mocker):
@@ -184,7 +184,7 @@ class TestDownloadAlbumSong:
             "/fake/cover.jpg",
             thread_id=1,
         )
-        assert result["s3_path"] == "Artist - Name/Album - Name/Song - Title.m4a"
+        assert result["s3_path"] == "Artist - Name/Album - Name/01 - Song - Title.m4a"
 
 
 class TestDownloadPlaylistSong:

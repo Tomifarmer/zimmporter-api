@@ -255,24 +255,11 @@ class Zimmporter:
                 shutil.rmtree(f"{temp_dir}{artist}/{album_name}", ignore_errors=True)
 
     @staticmethod
-    def _build_s3_path(artist: str, album: str, title: str, ext: str = "m4a") -> str:
-        """Build the S3-compatible object key for a song.
-
-        Replaces ``/`` with ``-`` in each component to produce a flat three-level
-        path.
-
-        Args:
-            artist: Artist name.
-            album: Album or playlist title.
-            title: Song title.
-            ext: File extension (default ``m4a``).
-
-        Returns:
-            Object key in the form ``artist/album/title.ext``.
-        """
+    def _build_s3_path(artist: str, album: str, title: str, track_number: int | None = None, ext: str = "m4a") -> str:
         a = artist.replace("/", "-")
         al = album.replace("/", "-")
-        s = title.replace("/", "-")
+        s = f"{track_number:02d} - {title}" if track_number is not None else title
+        s = s.replace("/", "-")
         return f"{a}/{al}/{s}.{ext}"
 
     @staticmethod
@@ -412,7 +399,7 @@ class Zimmporter:
         zimm.ytdlp_logger.set_album(album["title"])
 
         YTDL_OPTS["outtmpl"] = f"{song_dir}/%(id)s.%(ext)s"
-        s3_path = Zimmporter._build_s3_path(artist, album["title"], title)
+        s3_path = Zimmporter._build_s3_path(artist, album["title"], title, track_number=trackNumber)
         err_msg = None
 
         with yt_dlp.YoutubeDL(YTDL_OPTS) as ydl:
