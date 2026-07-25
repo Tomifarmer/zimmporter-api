@@ -10,12 +10,6 @@ docker compose up -d
 
 Then open the Swagger UI at http://localhost:8000/docs or try the API directly.
 
-### CLI (legacy)
-
-```bash
-zimmporter.sh search|download
-```
-
 ## API
 
 ### Endpoints

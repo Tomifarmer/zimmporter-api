@@ -1,7 +1,7 @@
 # Zimmporter — Music Importer
 
 ## What it is
-Python app that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to an S3-compatible bucket (defined in env vars). Exposed as a FastAPI + Celery API with optional CLI. Jobs and songs tracked in MariaDB.
+Python app that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to an S3-compatible bucket (defined in env vars). Exposed as a FastAPI + Celery API. Jobs and songs tracked in MariaDB.
 
 ## Structure
 ```
@@ -36,20 +36,6 @@ curl -s "http://localhost:8000/jobs?limit=50" -H "X-API-Key: your-secret" | jq .
 
 # Health check (always open, no auth required)
 curl -s "http://localhost:8000/health" | jq .
-```
-
-### CLI (legacy)
-```bash
-zimmporter.sh run search "<query>"
-zimmporter.sh run download <album_id>
-zimmporter.sh run download <id1,id2> --playlist -c 8
-```
-
-### Docker wrapper
-```bash
-zimmporter.sh serve              # Start API on port 8000
-zimmporter.sh runworker          # Start Celery worker
-zimmporter.sh run <cli args>     # Run CLI
 ```
 
 ## Authentication (optional)

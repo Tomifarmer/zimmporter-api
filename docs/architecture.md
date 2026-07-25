@@ -1,6 +1,6 @@
 # Zimmporter Architecture
 
-Music importer that searches YouTube Music, downloads albums and playlists, converts to AAC with embedded metadata and cover art, and uploads to an S3-compatible bucket.  Exposed as a FastAPI + Celery API with CLI fallback.
+Music importer that searches YouTube Music, downloads albums and playlists, converts to AAC with embedded metadata and cover art, and uploads to an S3-compatible bucket.  Exposed as a FastAPI + Celery API.
 
 ## High-Level Data Flow
 
@@ -52,7 +52,7 @@ Client (curl / UI)
 | `core.py` | `Zimmporter` class: search via ytmusicapi, download via yt-dlp + `billiard.Pool`, AAC conversion, per-song download methods returning status dicts |
 | `postprocessors.py` | yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover embed), `UploadToS3` (S3 upload + file cleanup) |
 | `ytdlp_logger.py` | Custom logger with per-song `[album/song]` context injected into every log line |
-| `__main__.py` | CLI entry point: `python -m zimmporter search|download` with emoji-formatted output |
+
 
 ### `api/` - FastAPI Application
 
@@ -211,7 +211,7 @@ Aurora/Running With The Wolves/The Midningsonne.m4a
 zimmporter-master/
 ├── zimmporter/              # Core library
 │   ├── __init__.py          # Re-exports Zimmporter
-│   ├── __main__.py          # CLI entry point
+
 │   ├── cert.py              # Private CA certificate configuration
 │   ├── core.py              # Zimmporter class, download logic
 │   ├── postprocessors.py    # yt-dlp postprocessors (metadata + S3)
@@ -250,5 +250,5 @@ zimmporter-master/
 ├── Dockerfile               # Multi-stage build
 ├── requirements.txt         # Python dependencies
 ├── AGENTS.md                # Session notes for AI assistants
-└── zimmporter.sh            # Docker wrapper helper
+
 ```
