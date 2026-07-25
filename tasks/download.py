@@ -173,7 +173,9 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                     album_name=album_name,
                     artist=artist,
                 )
-            to_download = [(song, album_data, artist, thumbnail_path) for song in tracks if song["title"] not in successful_titles]
+            to_download = [
+                (song, album_data, artist, thumbnail_path) for song in tracks if song["title"] not in successful_titles
+            ]
             total_tracks = len(to_download)
 
             zimm.yt = None
@@ -188,8 +190,8 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                     song_update = {"job_id": self.request.id, "title": result["title"]}
                     if result.get("status") is not None:
                         song_update["status"] = result["status"]
-                    if result.get("minio_path") is not None:
-                        song_update["minio_path"] = result["minio_path"]
+                    if result.get("s3_path") is not None:
+                        song_update["s3_path"] = result["s3_path"]
                     if result.get("error") is not None:
                         song_update["error"] = result["error"]
 
@@ -358,7 +360,11 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                     album_name=album_name,
                 )
 
-            to_download = [(song, playlist_data, artist, thumb) for song, playlist_data, artist, thumb in to_download if song["title"] not in successful_titles]
+            to_download = [
+                (song, playlist_data, artist, thumb)
+                for song, playlist_data, artist, thumb in to_download
+                if song["title"] not in successful_titles
+            ]
             total_tracks = len(to_download)
 
             zimm.yt = None
@@ -373,8 +379,8 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                     song_update = {"job_id": self.request.id, "title": result["title"]}
                     if result.get("status") is not None:
                         song_update["status"] = result["status"]
-                    if result.get("minio_path") is not None:
-                        song_update["minio_path"] = result["minio_path"]
+                    if result.get("s3_path") is not None:
+                        song_update["s3_path"] = result["s3_path"]
                     if result.get("error") is not None:
                         song_update["error"] = result["error"]
 

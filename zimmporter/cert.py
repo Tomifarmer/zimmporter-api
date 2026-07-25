@@ -1,7 +1,7 @@
 """Private CA certificate configuration.
 
 Provides helpers for injecting a private CA certificate into all HTTPS clients
-(requests, urllib3/MinIO) via environment variables.  yt-dlp and ytmusicapi
+(requests, boto3/S3) via environment variables.  yt-dlp and ytmusicapi
 pick up the cert automatically through ``REQUESTS_CA_BUNDLE``.
 
 Set ``CA_CERT`` to the path of a PEM file mounted into the container.  Also set

@@ -56,7 +56,7 @@ class SongStatusResponse(BaseModel):
         album: Album or playlist title.
         track_number: Track index within the album (``None`` for playlists).
         status: One of ``pending``, ``downloading``, ``success``, ``failed``.
-        minio_path: S3 object key if upload succeeded.
+        s3_path: S3 object key if upload succeeded.
         error: Failure message if status is ``failed``.
     """
 
@@ -66,7 +66,7 @@ class SongStatusResponse(BaseModel):
     album: str
     track_number: int | None = None
     status: str
-    minio_path: str | None = None
+    s3_path: str | None = None
     error: str | None = None
 
 

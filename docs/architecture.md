@@ -1,6 +1,6 @@
 # Zimmporter Architecture
 
-Music importer that searches YouTube Music, downloads albums and playlists, converts to AAC with embedded metadata and cover art, and uploads to an S3-compatible MinIO bucket.  Exposed as a FastAPI + Celery API with CLI fallback.
+Music importer that searches YouTube Music, downloads albums and playlists, converts to AAC with embedded metadata and cover art, and uploads to an S3-compatible bucket.  Exposed as a FastAPI + Celery API with CLI fallback.
 
 ## High-Level Data Flow
 
@@ -36,9 +36,9 @@ Client (curl / UI)
        |
        v
 +------------------+     +------------------+
-|  Postprocessors  |---->|  MinIO           |
-|  EnrichMeta      |     |  MinIO (S3-compatible)     |
-|  UploadToMinIO   |     +------------------+
+|  Postprocessors  |---->|  S3              |
+|  EnrichMeta      |     |  AWS S3                    |
+|  UploadToS3      |     +------------------+
 +------------------+
 ```
 
@@ -50,7 +50,7 @@ Client (curl / UI)
 |--------|---------|
 | `cert.py` | Private CA certificate configuration: `get_ca_cert()` returns cert path from env vars, `configure_ssl()` sets up requests library at startup |
 | `core.py` | `Zimmporter` class: search via ytmusicapi, download via yt-dlp + `billiard.Pool`, AAC conversion, per-song download methods returning status dicts |
-| `postprocessors.py` | yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover embed), `UploadToMinio` (S3 upload + file cleanup) |
+| `postprocessors.py` | yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover embed), `UploadToS3` (S3 upload + file cleanup) |
 | `ytdlp_logger.py` | Custom logger with per-song `[album/song]` context injected into every log line |
 | `__main__.py` | CLI entry point: `python -m zimmporter search|download` with emoji-formatted output |
 
@@ -84,17 +84,17 @@ Two levels of parallelism:
 
 1. **Celery level**: Each Celery worker process handles one download job (`worker_prefetch_multiplier=1`, `task_acks_late=True`).  Multiple worker processes can run in parallel.
 
-2. **Pool level**: Within a single album/playlist, `billiard.Pool(concurrent)` spawns child processes for per-song downloads.  Each child runs `yt-dlp` with ffmpegAAC conversion and MinIO upload.
+2. **Pool level**: Within a single album/playlist, `billiard.Pool(concurrent)` spawns child processes for per-song downloads.  Each child runs `yt-dlp` with ffmpegAAC conversion and S3 upload.
 
 ```
 Celery Worker Process
   |-- download_album task
        |-- Pool(4)
-            |-- child 1: song 1 (yt-dlp -> ffmpeg -> MinIO)
-            |-- child 2: song 2
-            |-- child 3: song 3
-            |-- child 4: song 4
-            |-- child 1: song 5  (after child 1 finishes song 1)
+             |-- child 1: song 1 (yt-dlp -> ffmpeg -> S3)
+             |-- child 2: song 2
+             |-- child 3: song 3
+             |-- child 4: song 4
+             |-- child 1: song 5  (after child 1 finishes song 1)
             |-- ...
 ```
 
@@ -133,7 +133,7 @@ Celery Worker Process
 | `album` | `VARCHAR(512)` | Album/playlist title |
 | `track_number` | `INT NULL` | Track index (NULL for playlists) |
 | `status` | `ENUM(pending, downloading, success, failed)` | Song state |
-| `minio_path` | `VARCHAR(1024)` | S3 object key after upload |
+| `s3_path` | `VARCHAR(1024)` | S3 object key after upload |
 | `error` | `TEXT` | Failure reason |
 | `created_at` | `DATETIME(3)` | UTC creation time |
 
@@ -160,15 +160,16 @@ Celery Worker Process
 
 **Valkey database usage:** db 0 = Celery broker, db 1 = Celery backend, db 2 = search result cache.
 
-### MinIO (S3-Compatible Storage)
+### S3 (AWS-Compatible Storage)
 
 | Variable | Default | Description |
-|----------|---|-------------|
-| `MINIO_ENDPOINT` | *(required)* | S3 endpoint (host:port) |
-| `MINIO_ACCESS_KEY` | *(required)* | S3 access key |
-| `MINIO_SECRET_KEY` | *(required)* | S3 secret key |
-| `MINIO_BUCKET` | *(required)* | Target bucket name |
-| `MINIO_USE_SSL` | `true` | Enable HTTPS for MinIO connections |
+|----------|---|---|
+| `AWS_ENDPOINT_URL` | *(required)* | S3 endpoint (host:port) |
+| `AWS_ACCESS_KEY_ID` | *(required)* | S3 access key |
+| `AWS_SECRET_ACCESS_KEY` | *(required)* | S3 secret key |
+| `AWS_BUCKET` | *(required)* | Target bucket name |
+| `AWS_USE_SSL` | `true` | Enable HTTPS for S3 connections |
+| `AWS_DEFAULT_REGION` | `us-east-1` | AWS region for S3 |
 
 ### SSL / TLS
 
@@ -177,7 +178,7 @@ Celery Worker Process
 | `CA_CERT` | *(unset)* | Path to a PEM file with private CA certificate(s) |
 | `REQUESTS_CA_BUNDLE` | *(unset)* | Same as `CA_CERT`; used by requests, yt-dlp, ytmusicapi internally |
 
-When set, all HTTPS clients (requests for thumbnails, urllib3/MinIO, yt-dlp, ytmusicapi) trust the private CA. If the file doesn't exist, a warning is logged and system certs are used as fallback. Set both `CA_CERT` and `REQUESTS_CA_BUNDLE` to the same mounted path.
+When set, all HTTPS clients (requests for thumbnails, boto3/S3, yt-dlp, ytmusicapi) trust the private CA. If the file doesn't exist, a warning is logged and system certs are used as fallback. Set both `CA_CERT` and `REQUESTS_CA_BUNDLE` to the same mounted path.
 
 ### Authentication (optional)
 
@@ -190,7 +191,7 @@ When set, all HTTPS clients (requests for thumbnails, urllib3/MinIO, yt-dlp, ytm
 
 Jobs and songs older than 30 days are automatically deleted on every successful `/health` check.  This prevents the database from accumulating stale data.  The cleanup runs via `DELETE ... WHERE created_at < cutoff` with `synchronize_session=False` for performance.
 
-## MinIO Object Path Convention
+## S3 Object Path Convention
 
 Uploaded files follow the pattern:
 
@@ -213,7 +214,7 @@ zimmporter-master/
 │   ├── __main__.py          # CLI entry point
 │   ├── cert.py              # Private CA certificate configuration
 │   ├── core.py              # Zimmporter class, download logic
-│   ├── postprocessors.py    # yt-dlp postprocessors (metadata + MinIO)
+│   ├── postprocessors.py    # yt-dlp postprocessors (metadata + S3)
 │   └── ytdlp_logger.py      # Custom logger with album/song context
 ├── api/                     # FastAPI application
 │   ├── __init__.py

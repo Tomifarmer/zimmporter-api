@@ -1,16 +1,15 @@
-"""yt-dlp postprocessors for metadata enrichment and MinIO upload.
+"""yt-dlp postprocessors for metadata enrichment and S3 upload.
 
 :class:`EnrichMeta` writes ID3 and MP4 tags plus embeds cover art.
-:class:`UploadToMinio` uploads the final file to an S3-compatible bucket
+:class:`UploadToS3` uploads the final file to an S3-compatible bucket
 configured via environment variables.
 """
 
 import os
 
-import minio
+import boto3
 import mutagen
-import urllib3
-from minio.commonconfig import Tags
+from botocore.config import Config
 from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4, MP4Cover
 from yt_dlp.postprocessor import PostProcessor
@@ -61,15 +60,16 @@ class EnrichMeta(PostProcessor):
         return [], info
 
 
-class UploadToMinio(PostProcessor):
-    """Upload completed audio file to MinIO and remove the local copy.
+class UploadToS3(PostProcessor):
+    """Upload completed audio file to S3 and remove the local copy.
 
     Reads S3 credentials from environment variables:
 
-    * ``MINIO_ENDPOINT`` — host:port (no default, must be set)
-    * ``MINIO_ACCESS_KEY`` — access key (no default, must be set)
-    * ``MINIO_SECRET_KEY`` — secret key (no default, must be set)
-    * ``MINIO_BUCKET`` — bucket name (no default, must be set)
+    * ``AWS_ENDPOINT_URL`` — S3-compatible endpoint URL (no default)
+    * ``AWS_ACCESS_KEY_ID`` — access key (no default)
+    * ``AWS_SECRET_ACCESS_KEY`` — secret key (no default)
+    * ``AWS_BUCKET`` — bucket name (no default)
+    * ``AWS_DEFAULT_REGION`` — region (default ``us-east-1``)
     """
 
     def __init__(self, metadata: dict) -> None:
@@ -82,7 +82,7 @@ class UploadToMinio(PostProcessor):
         self.metadata = metadata
 
     def run(self, info: dict) -> tuple[list, dict]:
-        """Upload the file to MinIO and delete the local copy.
+        """Upload the file to S3 and delete the local copy.
 
         The object key follows the pattern
         ``artist/album/title.ext`` with ``/`` replaced by ``-``.
@@ -99,45 +99,34 @@ class UploadToMinio(PostProcessor):
         album = self.metadata["album"].replace("/", "-")
         song = self.metadata["title"].replace("/", "-")
 
-        minio_path = f"{artist}/{album}/{song}.{info['ext']}"
+        s3_path = f"{artist}/{album}/{song}.{info['ext']}"
 
-        access_key = os.getenv("MINIO_ACCESS_KEY")
-        secret_key = os.getenv("MINIO_SECRET_KEY")
-        minio_endpoint = os.getenv("MINIO_ENDPOINT")
-        use_https = os.getenv("MINIO_USE_SSL", "true").lower() == "true"
-        minio_bucket = os.getenv("MINIO_BUCKET")
+        access_key = os.getenv("AWS_ACCESS_KEY_ID")
+        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        endpoint = os.getenv("AWS_ENDPOINT_URL")
+        bucket = os.getenv("AWS_BUCKET")
+        use_https = os.getenv("AWS_USE_SSL", "true").lower() == "true"
+        region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
-        tags = Tags(for_object=True)
-        tags["provider"] = "zimmporter"
-
-        if use_https:
-            httpClient = urllib3.PoolManager(
-                cert_reqs="CERT_REQUIRED",
-                ca_certs=get_ca_cert() or "/etc/ssl/certs/ca-certificates.crt",
-                timeout=urllib3.Timeout(total=360, connect=300, read=300),
-                maxsize=10,
-                retries=urllib3.Retry(
-                    total=5, respect_retry_after_header=False, status_forcelist=(413, 429, 502, 503, 504)
-                ),
-            )
-        else:
-            httpClient = urllib3.PoolManager(
-                timeout=urllib3.Timeout(total=360, connect=300, read=300),
-                maxsize=10,
-                retries=urllib3.Retry(
-                    total=5, respect_retry_after_header=False, status_forcelist=(413, 429, 502, 503, 504)
-                ),
-            )
-
-        self.to_screen(f"Uploading {info['filepath']} to {minio_bucket}/{minio_path}")
-
-        client = minio.Minio(
-            minio_endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            http_client=httpClient,
-            secure=use_https,
+        botocore_config = Config(
+            connect_timeout=300,
+            read_timeout=300,
+            max_pool_connections=10,
+            retries={"max_attempts": 5, "mode": "standard"},
         )
-        client.fput_object(minio_bucket, minio_path, info["filepath"], tags=tags)
+
+        self.to_screen(f"Uploading {info['filepath']} to {bucket}/{s3_path}")
+
+        client = boto3.Session(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region,
+        ).client(
+            "s3",
+            endpoint_url=endpoint,
+            config=botocore_config,
+            verify=get_ca_cert() if use_https else None,
+        )
+        client.upload_file(info["filepath"], bucket, s3_path, ExtraArgs={"Tagging": "provider=zimmporter"})
         os.remove(info["filepath"])
         return [], info

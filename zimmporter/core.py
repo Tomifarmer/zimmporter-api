@@ -23,7 +23,7 @@ from billiard import Pool
 from ytmusicapi import YTMusic
 
 from zimmporter.cert import get_ca_cert
-from zimmporter.postprocessors import EnrichMeta, UploadToMinio
+from zimmporter.postprocessors import EnrichMeta, UploadToS3
 from zimmporter.ytdlp_logger import YTDLPLogger
 
 #: Temporary working directory for intermediate downloads and thumbnails.
@@ -256,7 +256,7 @@ class Zimmporter:
                 shutil.rmtree(f"{temp_dir}{artist}", ignore_errors=True)
 
     @staticmethod
-    def _build_minio_path(artist: str, album: str, title: str, ext: str = "m4a") -> str:
+    def _build_s3_path(artist: str, album: str, title: str, ext: str = "m4a") -> str:
         """Build the S3-compatible object key for a song.
 
         Replaces ``/`` with ``-`` in each component to produce a flat three-level
@@ -300,7 +300,7 @@ class Zimmporter:
 
         Returns:
             Dict with keys ``title``, ``artist``, ``album``, ``track_number``,
-            ``status``, ``minio_path``, ``error``.
+            ``status``, ``s3_path``, ``error``.
         """
         title = song["title"]
         zimm = Zimmporter()
@@ -316,7 +316,7 @@ class Zimmporter:
         zimm.ytdlp_logger.set_album(album["title"])
 
         YTDL_OPTS["outtmpl"] = f"{song_dir}/%(id)s.%(ext)s"
-        minio_path = Zimmporter._build_minio_path("playlists", album["title"], title)
+        s3_path = Zimmporter._build_s3_path("playlists", album["title"], title)
         err_msg = None
 
         with yt_dlp.YoutubeDL(YTDL_OPTS) as ydl:
@@ -327,7 +327,7 @@ class Zimmporter:
                 "date": str(album.get("year", "")),
             }
             ydl.add_post_processor(EnrichMeta(metadata, thumbnail_path), when="post_process")
-            ydl.add_post_processor(UploadToMinio(metadata), when="post_process")
+            ydl.add_post_processor(UploadToS3(metadata), when="post_process")
 
             for attempt in range(MAX_RETRIES):
                 try:
@@ -357,7 +357,7 @@ class Zimmporter:
             "album": album["title"],
             "track_number": None,
             "status": "success" if err_msg is None else "failed",
-            "minio_path": minio_path,
+            "s3_path": s3_path,
             "error": err_msg,
         }
 
@@ -386,7 +386,7 @@ class Zimmporter:
 
         Returns:
             Dict with keys ``title``, ``artist``, ``album``, ``track_number``,
-            ``status``, ``minio_path``, ``error``.
+            ``status``, ``s3_path``, ``error``.
         """
         title = song["title"]
         trackNumber = song["trackNumber"]
@@ -405,7 +405,7 @@ class Zimmporter:
         zimm.ytdlp_logger.set_album(album["title"])
 
         YTDL_OPTS["outtmpl"] = f"{song_dir}/%(id)s.%(ext)s"
-        minio_path = Zimmporter._build_minio_path(artist, album["title"], title)
+        s3_path = Zimmporter._build_s3_path(artist, album["title"], title)
         err_msg = None
 
         with yt_dlp.YoutubeDL(YTDL_OPTS) as ydl:
@@ -417,7 +417,7 @@ class Zimmporter:
                 "tracknumber": str(trackNumber),
             }
             ydl.add_post_processor(EnrichMeta(metadata, thumbnail_path), when="post_process")
-            ydl.add_post_processor(UploadToMinio(metadata), when="post_process")
+            ydl.add_post_processor(UploadToS3(metadata), when="post_process")
 
             for attempt in range(MAX_RETRIES):
                 try:
@@ -450,7 +450,7 @@ class Zimmporter:
             "album": album["title"],
             "track_number": trackNumber,
             "status": "success" if err_msg is None else "failed",
-            "minio_path": minio_path,
+            "s3_path": s3_path,
             "error": err_msg,
         }
 
@@ -464,9 +464,9 @@ class Zimmporter:
     @staticmethod
     def _download_playlist_song_task(song, album, artist, thumbnail_path):
         """Pool-compatible wrapper for :meth:`download_playlist_song`."""
-        return Zimmporter.download_playlist_song(song, album, artist, thumbnail_path, thread_id=threading.get_ident()) or {
-            "title": song["title"]
-        }
+        return Zimmporter.download_playlist_song(
+            song, album, artist, thumbnail_path, thread_id=threading.get_ident()
+        ) or {"title": song["title"]}
 
     def _my_hook(self, d):
         """yt-dlp progress hook — logs a message when download finishes."""

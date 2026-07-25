@@ -1,6 +1,6 @@
 # End-to-End Test
 
-Quick integration test that exercises the full download pipeline: search, queue a download, poll progress, and verify the uploaded files in MinIO.
+Quick integration test that exercises the full download pipeline: search, queue a download, poll progress, and verify the uploaded files in S3.
 
 ## Prerequisites
 
@@ -10,8 +10,8 @@ The following tools must be installed on the test machine:
 |------|---------|
 | `curl` | HTTP requests to the API |
 | `jq` | JSON parsing |
-| `mc` | MinIO client for file verification |
-| `minio` | MinIO server (if running locally) |
+| `mc` | S3 client for file verification |
+| `minio` | S3 server (if running locally) |
 
 **Services must be running** — the script assumes `docker compose up -d` has already been executed (or equivalent):
 
@@ -19,12 +19,12 @@ The following tools must be installed on the test machine:
 - Celery worker(s)
 - Valkey
 - MariaDB
-- MinIO (if using a local instance)
+- S3 (if using a local instance)
 
 ## Usage
 
 ```bash
-export MINIO_SECRET_KEY="your_secret_key_here"
+export AWS_SECRET_ACCESS_KEY="your_secret_key_here"
 ./e2e_test.sh "Aurora"
 ```
 
@@ -33,10 +33,10 @@ export MINIO_SECRET_KEY="your_secret_key_here"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_URL` | `http://localhost:8000` | API endpoint |
-| `MINIO_ENDPOINT` | *(required)* | MinIO host:port |
-| `MINIO_ACCESS_KEY` | *(required)* | MinIO access key |
-| `MINIO_SECRET_KEY` | *(required)* | MinIO secret key |
-| `MINIO_BUCKET` | *(required)* | Bucket name |
+| `AWS_ENDPOINT_URL` | *(required)* | S3 endpoint host:port |
+| `AWS_ACCESS_KEY_ID` | *(required)* | S3 access key |
+| `AWS_SECRET_ACCESS_KEY` | *(required)* | S3 secret key |
+| `AWS_BUCKET` | *(required)* | Bucket name |
 
 ## What the Script Does
 
@@ -64,18 +64,18 @@ Job 7
 
   Songs: 12 success, 0 failed (12 total)
 
-  TITLE                            STATUS       TRACK MINIO PATH
+  TITLE                            STATUS       TRACK S3 PATH
   -------                          ------       ----- ----------
   1. Don't Know You                success      1     Aurora/Runaway/1 - Don't Know You.m4a
   2. Runaway                        success      2     Aurora/Runaway/2 - Runaway.m4a
   ...
 
 ────────────────────────────────────────────────────────────
-MinIO Verification
+S3 Verification
 ────────────────────────────────────────────────────────────
   ✓ mc alias configured
 
-  MINIO PATH                       S3 STATUS    SIZE
+  S3 PATH                         S3 STATUS    SIZE
   ----------                       ---------    ----
   ✓ 1. Don't Know You              exists       5.2M
   ✓ 2. Runaway                     exists       4.8M
@@ -92,15 +92,15 @@ The flow is:
 2. **Search** — hits `GET /search?q=Aurora&type=albums`, extracts the first album's `browseId`.
 3. **Download** — posts `POST /download/album` with the `browseId`, captures the returned `job_id`.
 4. **Poll** — hits `GET /jobs/{job_id}` every second, showing a progress bar with song count, album progress, and status message. Times out after 15 minutes.
-5. **Result table** — prints a per-song table with title, status, track number, and MinIO path. Failed songs show their error message.
-6. **MinIO verification** — configures an `mc` alias, then runs `mc stat` on every song's MinIO path to confirm the file exists in the bucket.
+5. **Result table** — prints a per-song table with title, status, track number, and S3 path. Failed songs show their error message.
+6. **S3 verification** — configures an `mc` alias, then runs `mc stat` on every song's S3 path to confirm the file exists in the bucket.
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
-| `0` | Fully passed — job succeeded, all songs present in MinIO |
-| `1` | Job failed or MinIO verification completely failed |
+| `0` | Fully passed — job succeeded, all songs present in S3 |
+| `1` | Job failed or S3 verification completely failed |
 | `2` | Partial — job completed but one or more songs failed |
 
 ## Troubleshooting
@@ -113,18 +113,18 @@ Ensure `docker compose up -d` has finished starting. Check logs:
 docker compose logs api --tail=20
 ```
 
-### MinIO verification shows MISSING
+### S3 verification shows MISSING
 
 The songs may still be uploading. Re-run the script, or manually check:
 
 ```bash
-mc alias set e2etestminio "https://${MINIO_ENDPOINT}" "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" --api s3v4
+mc alias set e2etestminio "${AWS_ENDPOINT_URL}" "${AWS_ACCESS_KEY_ID}" "${AWS_SECRET_ACCESS_KEY}" --api s3v4
 mc stat e2etestminio/musics/Aurora/Runaway/Runaway.m4a
 ```
 
 ### Internal CA cert errors with `mc`
 
-If the MinIO endpoint uses a self-signed or internal CA certificate, `mc` may need explicit CA config:
+If the S3 endpoint uses a self-signed or internal CA certificate, `mc` may need explicit CA config:
 
 ```bash
 # If mc warns about an invalid CA:

@@ -1,6 +1,6 @@
 # Zimmporter
 
-Music importer API that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to a MinIO bucket. Backed by FastAPI + Celery with MariaDB for job tracking.
+Music importer API that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to an S3-compatible bucket. Backed by FastAPI + Celery with MariaDB for job tracking.
 
 ## Getting started
 
@@ -94,16 +94,16 @@ Client (curl / UI)
         |
         v
 +------------------+     +------------------+
-|  Postprocessors  |---->|  MinIO           |
-|  EnrichMeta      |     |  MinIO (S3-compatible)     |
-|  UploadToMinio   |     +------------------+
+|  Postprocessors  |---->|  S3              |
+|  EnrichMeta      |     |  AWS S3                    |
+|  UploadToS3      |     +------------------+
 +------------------+
 ```
 
 ### Components
 
 - **`zimmporter/`** — Core library: cert config, search (ytmusicapi), download (yt-dlp + `billiard.Pool`), AAC conversion, per-song download methods returning status dicts
-- **`postprocessors.py`** — yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover embed), `UploadToMinio` (S3 upload + file cleanup)
+- **`postprocessors.py`** — yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover embed), `UploadToS3` (S3 upload + file cleanup)
 - **`api/`** — FastAPI app with routes for search, download, and jobs; `/health` endpoint validates all backend components
 - **`tasks/`** — Celery tasks wrap parallel song downloads in a pool of child processes
 - **`db/`** — SQLAlchemy engine + ORM models (`Job`, `Song`)
@@ -113,7 +113,7 @@ Client (curl / UI)
 Two levels of parallelism:
 
 1. **Celery level**: One task per job, multiple worker processes can run in parallel.
-2. **Pool level**: Within a single album/playlist, each pool child downloads and converts one song at a time via yt-dlp + ffmpegAAC conversion + MinIO upload.
+2. **Pool level**: Within a single album/playlist, each pool child downloads and converts one song at a time via yt-dlp + ffmpegAAC conversion + S3 upload.
 
 ### Environment Variables
 
@@ -125,7 +125,7 @@ Key variables:
 | DB | `DB_USER` / `DB_PASS` | `root` | Database credentials |
 | DB | `DB_NAME` | `zimmporter` | Database name |
 | Celery | `CELERY_BROKER` | `redis://localhost:6379/0` | Broker URL (works with Valkey) |
-| MinIO | `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_BUCKET` | — | S3-compatible storage credentials |
+| S3 | `AWS_ENDPOINT_URL` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_BUCKET` / `AWS_USE_SSL` / `AWS_DEFAULT_REGION` | — | S3-compatible storage credentials |
 | Auth | `REQUIRE_AUTH` | `false` | Enable API key auth on all routes except `/health` |
 | SSL | `CA_CERT`, `REQUESTS_CA_BUNDLE` | unset | Path to private CA PEM file for HTTPS clients |
 

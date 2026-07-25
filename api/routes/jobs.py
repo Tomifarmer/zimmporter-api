@@ -50,7 +50,7 @@ def _build_response(job: Job, songs: list) -> dict:
                 "album": s.album,
                 "track_number": s.track_number,
                 "status": s.status,
-                "minio_path": s.minio_path,
+                "s3_path": s.s3_path,
                 "error": s.error,
             }
             for s in songs

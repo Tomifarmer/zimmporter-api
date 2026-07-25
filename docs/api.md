@@ -239,7 +239,7 @@ Returns the current status of a specific job with embedded per-song statuses.  P
       "album": "Album Name",
       "track_number": 1,
       "status": "success",
-      "minio_path": "Artist-Name/Album-Name/Track-One.m4a",
+      "s3_path": "Artist-Name/Album-Name/Track-One.m4a",
       "error": null
     }
   ]
@@ -280,7 +280,7 @@ Celery worker picks up task
         -> Fetch tracks from ytmusicapi
         -> Insert Song rows (status=pending)
         -> Pool downloads songs in parallel
-        -> Per-song: DB updated (success/failed, minio_path)
+        -> Per-song: DB updated (success/failed, s3_path)
         -> Job progress updated (current_song / total_songs)
     -> On completion: status = "success"
     -> On error: status = "failed", error = message

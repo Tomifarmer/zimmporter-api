@@ -1,7 +1,7 @@
 # Zimmporter — Music Importer
 
 ## What it is
-Python app that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to a MinIO bucket (defined in env vars). Exposed as a FastAPI + Celery API with optional CLI. Jobs and songs tracked in MariaDB.
+Python app that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to an S3-compatible bucket (defined in env vars). Exposed as a FastAPI + Celery API with optional CLI. Jobs and songs tracked in MariaDB.
 
 ## Structure
 ```
@@ -60,7 +60,7 @@ Set `REQUIRE_AUTH=true` to enforce API key authentication on all endpoints excep
 - **Deno binary** at `/usr/local/bin/deno` (yt-dlp EJS JS runtime)
 - **Valkey** for Celery broker/backend (docker compose provides this); uses `redis://` URL scheme with the `redis` python client
 - **MariaDB** for job + song tracking (docker compose provides this); env vars `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME
-- **MinIO** configured via env vars: `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`
+- **S3** configured via env vars: `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`
 - **Temp mount**: expects `/data/zimmer/importer` for intermediate files
 
 ## Docker
@@ -77,10 +77,10 @@ Set `REQUIRE_AUTH=true` to enforce API key authentication on all endpoints excep
 - Logger + `YTDL_OPTS` mutated on module level — reinitialized in each forked worker because state is lost after `billiard.Pool` fork
 
 ## Gotchas
-- MinIO configured via env vars (`MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`) with previous defaults for backward compat
+- S3 configured via env vars (`AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`) with previous defaults for backward compat
 - `self.yt = None` is set before `billiard.Pool` in download logic to avoid pickling YTMusic client across forks
 - Uses `billiard.Pool` (Celery's vendored multiprocessing) instead of `multiprocessing.Pool` — the latter causes issues when running inside Celery workers
 - Uses the `redis` python client against Valkey (drop-in compatible) with `redis://` URLs
-- `/` in artist/album/song names is replaced with `-` for MinIO paths (`zimmporter/postprocessors.py:35-37`)
+- `/` in artist/album/song names is replaced with `-` for S3 paths (`zimmporter/postprocessors.py:35-37`)
 - Concurrent downloads share `YTDL_OPTS` global dict; workers modify `outtmpl` per song
 - No local tests exist; verification is manual

@@ -95,7 +95,7 @@ class Song(Base):
         album: Album or playlist title.
         track_number: Track index (``None`` for playlists).
         status: ``pending``, ``downloading``, ``success``, or ``failed``.
-        minio_path: S3 object key after successful upload.
+        s3_path: S3 object key after successful upload.
         error: Exception message if download or upload failed.
         created_at: UTC timestamp of row creation.
         job: Relationship back to :class:`Job`.
@@ -114,7 +114,7 @@ class Song(Base):
         nullable=False,
         default="pending",
     )
-    minio_path = Column(String(1024), nullable=True)
+    s3_path = Column(String(1024), nullable=True)
     error = Column(Text, nullable=True)
     release_date = Column(SaDate, nullable=True)
     created_at = Column(DateTime(3), default=lambda: datetime.datetime.now(datetime.UTC))

@@ -10,11 +10,11 @@ fi
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 API_URL="${API_URL:-http://localhost:8000}"
-MINIO_ENDPOINT="${MINIO_ENDPOINT:-}"
-MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-}"
-MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-}"
-MINIO_BUCKET="${MINIO_BUCKET:-}"
-MINIO_USE_SSL="${MINIO_USE_SSL:-true}"
+AWS_ENDPOINT_URL="${AWS_ENDPOINT_URL:-}"
+AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
+AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
+AWS_BUCKET="${AWS_BUCKET:-}"
+AWS_USE_SSL="${AWS_USE_SSL:-true}"
 POLL_INTERVAL=1
 POLL_TIMEOUT=900       # 15 minutes max
 ALIAS_NAME="e2etestminio"
@@ -46,10 +46,10 @@ if [[ $# -lt 1 ]]; then
     echo ""
     echo "Environment overrides:"
     echo "  API_URL          API endpoint          (default: http://localhost:8000)"
-    echo "  MINIO_ENDPOINT   MinIO host:port       (required!)"
-    echo "  MINIO_ACCESS_KEY MinIO access key      (required!)"
-    echo "  MINIO_SECRET_KEY MinIO secret key      (required!)"
-    echo "  MINIO_BUCKET     MinIO bucket name     (required!)"
+    echo "  AWS_ENDPOINT_URL       S3 endpoint URL          (required!)"
+    echo "  AWS_ACCESS_KEY_ID      S3 access key            (required!)"
+    echo "  AWS_SECRET_ACCESS_KEY  S3 secret key            (required!)"
+    echo "  AWS_BUCKET             S3 bucket name           (required!)"
     exit 1
 fi
 
@@ -62,8 +62,8 @@ for cmd in curl jq mc; do
     command -v "$cmd" &>/dev/null || die "'$cmd' not found — install it first."
 done
 
-if [[ -z "$MINIO_SECRET_KEY" ]]; then
-    die "MINIO_SECRET_KEY is empty — set it (or put a key in .env and source it)."
+if [[ -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+    die "AWS_SECRET_ACCESS_KEY is empty — set it (or put a key in .env and source it)."
 fi
 
 info "Waiting for API at ${API_URL}/health ..."
@@ -196,14 +196,14 @@ printf "  Songs: ${GREEN}%s success${NC}, ${RED}%s failed${NC} (${BOLD}%s total$
 echo ""
 
 if [[ "$SONG_COUNT" -eq 0 || "$SONG_COUNT" -gt 0 ]]; then
-    printf "  ${BOLD}%-40s %-12s %-5s %s${NC}\n" "TITLE" "STATUS" "TRACK" "MINIO PATH"
-    printf "  %-40s %-12s %-5s %s\n" "-------" "------" "-----" "----------"
+    printf "  ${BOLD}%-40s %-12s %-5s %s${NC}\n" "TITLE" "STATUS" "TRACK" "S3 PATH"
+    printf "  %-40s %-12s %-5s %s\n" "-------" "------" "-----" "-------"
 
     echo "$JOB_JSON" | jq -r '.songs[] | @json' | while IFS= read -r song; do
         S_TITLE=$(echo "$song" | jq -r '.title')
         S_STATUS=$(echo "$song" | jq -r '.status')
         S_TRACK=$(echo "$song" | jq -r '.track_number // "-"')
-        S_PATH=$(echo "$song" | jq -r '.minio_path // "N/A"')
+        S_PATH=$(echo "$song" | jq -r '.s3_path // "N/A"')
         S_ERROR=$(echo "$song" | jq -r '.error // ""')
 
         # Truncate long fields
@@ -237,16 +237,11 @@ echo "────────────────────────�
 printf "${BOLD}MinIO Verification${NC}\n"
 echo "────────────────────────────────────────────────────────────"
 
-if [[ "MINIO_USE_SSL" == true ]]; then
-  MC_PROTOCOL="https"
-else
-  MC_PROTOCOL="http"
-fi
 mc alias remove "$ALIAS_NAME" 2>/dev/null || true
 mc alias set "$ALIAS_NAME" \
-    "$MC_PROTOCOL://${MINIO_ENDPOINT}" \
-    "${MINIO_ACCESS_KEY}" \
-    "${MINIO_SECRET_KEY}" 2>/dev/null
+    "${AWS_ENDPOINT_URL}" \
+    "${AWS_ACCESS_KEY_ID}" \
+    "${AWS_SECRET_ACCESS_KEY}" 2>/dev/null
 pass "mc alias configured"
 
 echo ""
@@ -254,16 +249,16 @@ VERIFY_PASS=0
 VERIFY_FAIL=0
 VERIFY_SKIP=0
 
-printf "  ${BOLD}%-40s %-12s %s${NC}\n" "MINIO PATH" "S3 STATUS" "SIZE"
+printf "  ${BOLD}%-40s %-12s %s${NC}\n" "S3 PATH" "S3 STATUS" "SIZE"
 printf "  %-40s %-12s %s\n" "----------" "---------" "----"
 
-echo "$JOB_JSON" | jq -r '.songs[] | select(.minio_path != null) | @json' | while IFS= read -r song; do
-    S_PATH=$(echo "$song" | jq -r '.minio_path')
+echo "$JOB_JSON" | jq -r '.songs[] | select(.s3_path != null) | @json' | while IFS= read -r song; do
+    S_PATH=$(echo "$song" | jq -r '.s3_path')
     S_TITLE=$(echo "$song" | jq -r '.title')
     [[ ${#S_TITLE} -gt 40 ]] && S_TITLE="${S_TITLE:0:37}..."
 
     # Check the object exists in S3
-    MC_OUTPUT=$(mc stat "$ALIAS_NAME/${MINIO_BUCKET}/${S_PATH}" 2>&1 || true)
+    MC_OUTPUT=$(mc stat "$ALIAS_NAME/${AWS_BUCKET}/${S_PATH}" 2>&1 || true)
 
     if echo "$MC_OUTPUT" | grep -q "Size:"; then
         S3_SIZE=$(echo "$MC_OUTPUT" | grep "Size:" | awk '{print $2}')

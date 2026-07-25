@@ -41,11 +41,12 @@ services:
       - DB_USER=root
       - DB_PASS=root
       - DB_NAME=zimmporter
-      - MINIO_ACCESS_KEY=test
-      - MINIO_SECRET_KEY=test123456789
-      - MINIO_ENDPOINT=192.168.2.250:9000 # host:port
-      - MINIO_USE_SSL=false
-      - MINIO_BUCKET=test
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test123456789
+      - AWS_ENDPOINT_URL=http://192.168.2.250:9000
+      - AWS_USE_SSL=false
+      - AWS_BUCKET=test
+      - AWS_DEFAULT_REGION=us-east-1
       - REQUIRE_AUTH=false
     volumes:
       - zimmer_data:/data/zimmer/importer
@@ -65,11 +66,12 @@ services:
       - DB_USER=root
       - DB_PASS=root
       - DB_NAME=zimmporter
-      - MINIO_ACCESS_KEY=test
-      - MINIO_SECRET_KEY=test123456789
-      - MINIO_ENDPOINT=192.168.2.250:9000 # host:port
-      - MINIO_USE_SSL=false
-      - MINIO_BUCKET=test
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test123456789
+      - AWS_ENDPOINT_URL=http://192.168.2.250:9000
+      - AWS_USE_SSL=false
+      - AWS_BUCKET=test
+      - AWS_DEFAULT_REGION=us-east-1
     volumes:
       - zimmer_data:/data/zimmer/importer
     depends_on:
