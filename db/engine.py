@@ -37,6 +37,27 @@ ScopedSession = scoped_session(session_factory)
 def init_db() -> None:
     """Create all tables defined in :data:`db.models.Base` metadata if they don't exist."""
     Base.metadata.create_all(engine)
+    migrate_schema()
+
+
+def migrate_schema() -> None:
+    """Add missing columns that were introduced after the initial table creation."""
+    from sqlalchemy import inspect
+    from sqlalchemy import text as sa_text
+
+    inspector = inspect(engine)
+    existing_columns = {col["name"] for col in inspector.get_columns("songs")}
+
+    additions = {
+        "release_date": "ALTER TABLE songs ADD COLUMN release_date DATE NULL",
+        "s3_path": "ALTER TABLE songs ADD COLUMN s3_path VARCHAR(1024) NULL",
+    }
+
+    with engine.connect() as conn:
+        for col, ddl in additions.items():
+            if col not in existing_columns:
+                conn.execute(sa_text(ddl))
+        conn.commit()
 
 
 @contextmanager

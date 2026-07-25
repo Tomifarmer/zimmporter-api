@@ -8,6 +8,7 @@ all backend components (Valkey, Celery worker, MariaDB) and triggers
 
 import datetime
 import os
+from contextlib import asynccontextmanager
 
 import redis
 from fastapi import FastAPI
@@ -23,11 +24,18 @@ from api.routes.search import search_router
 from db.engine import get_session, init_db
 from db.models import Song
 from tasks.celery_app import celery_app
+from zimmporter import __version__
 from zimmporter.cert import configure_ssl
 
-from zimmporter import __version__
 
-app = FastAPI(title="Zimmporter API", version=__version__)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    configure_ssl()
+    init_db()
+    yield
+
+
+app = FastAPI(title="Zimmporter API", version=__version__, lifespan=lifespan)
 app.include_router(search_router)
 app.include_router(download_router)
 app.include_router(jobs_router)
@@ -73,13 +81,6 @@ app.add_middleware(
 )
 
 app.add_middleware(AuthMiddleware)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    """Configure SSL and create database tables if they do not exist."""
-    configure_ssl()
-    init_db()
 
 
 @app.get("/health")

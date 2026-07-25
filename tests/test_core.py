@@ -159,7 +159,7 @@ class TestDownloadAlbumSong:
     def test_returns_error_on_failure(self, mocker):
         mocker.patch("zimmporter.core.RETRY_DELAY", 0)
         mocker.patch("zimmporter.core.MAX_RETRIES", 2)
-        mock_ydl = mocker.patch("zimmporter.core.yt_dlp.YoutubeDL")
+        mock_ydl = mocker.patch("yt_dlp.YoutubeDL")
         mock_ydl_context = MagicMock()
         mock_ydl_instance = MagicMock()
         mock_ydl_instance.download.side_effect = Exception("Download failed")

@@ -18,12 +18,9 @@ import threading
 import time
 
 import requests
-import yt_dlp
-from billiard import Pool
 from ytmusicapi import YTMusic
 
 from zimmporter.cert import get_ca_cert
-from zimmporter.postprocessors import EnrichMeta, UploadToS3
 from zimmporter.ytdlp_logger import YTDLPLogger
 
 #: Temporary working directory for intermediate downloads and thumbnails.
@@ -203,6 +200,7 @@ class Zimmporter:
             Sets ``self.yt = None`` before each pool spawn to avoid
             pickling the YTMusic HTTP client across forks.
         """
+        from billiard import Pool
         if not album and not playlist:
             return
 
@@ -302,6 +300,10 @@ class Zimmporter:
             Dict with keys ``title``, ``artist``, ``album``, ``track_number``,
             ``status``, ``s3_path``, ``error``.
         """
+        import yt_dlp
+
+        from zimmporter.postprocessors import EnrichMeta, UploadToS3
+
         title = song["title"]
         zimm = Zimmporter()
         tid = thread_id or os.getpid()
@@ -388,6 +390,10 @@ class Zimmporter:
             Dict with keys ``title``, ``artist``, ``album``, ``track_number``,
             ``status``, ``s3_path``, ``error``.
         """
+        import yt_dlp
+
+        from zimmporter.postprocessors import EnrichMeta, UploadToS3
+
         title = song["title"]
         trackNumber = song["trackNumber"]
         zimm = Zimmporter()

@@ -42,9 +42,12 @@ curl -s "http://localhost:8000/health" | jq .
 Set `REQUIRE_AUTH=true` to enforce API key authentication on all endpoints except `/health`. Clients must send an `X-API-Key` header matching the value of the `API_KEY` env var.
 
 ## Runtime requirements
-- **Python 3.14+**, dependencies in `requirements.txt`
-- **ffmpeg** (system-level, for audio extraction)
-- **Deno binary** at `/usr/local/bin/deno` (yt-dlp EJS JS runtime)
+- **Python 3.14+**, dependencies split across requirement files:
+  - `requirements.txt` — API container (FastAPI, uvicorn + `requirements-base.txt`)
+  - `requirements-base.txt` — shared minimal deps (ytmusicapi, celery, sqlalchemy, pymysql, requests)
+  - `requirements-worker.txt` — worker container (same as base + yt-dlp, boto3, mutagen)
+- **ffmpeg** (system-level, worker container only)
+- **Deno binary** at `/usr/local/bin/deno` (worker container only)
 - **Valkey** for Celery broker/backend (docker compose provides this); uses `redis://` URL scheme with the `redis` python client
 - **MariaDB** for job + song tracking (docker compose provides this); env vars `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME
 - **S3** configured via env vars: `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`
@@ -68,6 +71,7 @@ Set `REQUIRE_AUTH=true` to enforce API key authentication on all endpoints excep
 - `self.yt = None` is set before `billiard.Pool` in download logic to avoid pickling YTMusic client across forks
 - Uses `billiard.Pool` (Celery's vendored multiprocessing) instead of `multiprocessing.Pool` — the latter causes issues when running inside Celery workers
 - Uses the `redis` python client against Valkey (drop-in compatible) with `redis://` URLs
-- `/` in artist/album/song names is replaced with `-` for S3 paths (`zimmporter/postprocessors.py:35-37`)
+- `/` in artist/album/song names is replaced with `-` for S3 paths (`zimmporter/postprocessors.py:98-100`)
 - Concurrent downloads share `YTDL_OPTS` global dict; workers modify `outtmpl` per song
+- Heavy imports (`yt_dlp`, `boto3`, `mutagen`, `billiard.Pool`) are lazy — inside the methods that use them, not at module level. This keeps the API container from needing them at import time.
 - 71 pytest tests covering core, routes, postprocessors, health, cert — run with `uv run python -m pytest tests/`
