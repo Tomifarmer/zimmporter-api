@@ -63,12 +63,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ${{
-            (matrix.target == 'api' && matrix.variant == 'alpine') && 'Dockerfile.alpine' ||
-            (matrix.target == 'api' && matrix.variant == 'debian') && 'Dockerfile' ||
-            (matrix.target == 'worker' && matrix.variant == 'alpine') && 'Dockerfile.worker.alpine' ||
-            'Dockerfile.worker'
-          }}
+          file: ${{ (matrix.target == 'api' && matrix.variant == 'alpine') && 'Dockerfile.alpine' || (matrix.target == 'api' && matrix.variant == 'debian') && 'Dockerfile' || (matrix.target == 'worker' && matrix.variant == 'alpine') && 'Dockerfile.worker.alpine' || 'Dockerfile.worker' }}
           push: ${{ github.event_name != 'pull_request' }}
           load: true
           tags: ${{ steps.meta.outputs.tags }}
