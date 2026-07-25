@@ -31,7 +31,9 @@ services:
       start_period: 30s
 
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
     ports:
       - "8000:8000"
     environment:
@@ -58,7 +60,9 @@ services:
     command: ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
     environment:
       - CELERY_BROKER=redis://valkey:6379/0
       - CELERY_BACKEND=redis://valkey:6379/1
