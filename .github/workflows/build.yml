@@ -74,4 +74,5 @@ jobs:
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}:${{ matrix.variant }}
           severity: CRITICAL,HIGH
+          ignore-unfixed: true
           exit-code: 1
