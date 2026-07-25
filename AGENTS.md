@@ -9,6 +9,7 @@ zimmporter/          — core library (cert config, search, download, yt-dlp pos
 api/                 — FastAPI routes (search, download, jobs)
 db/                  — SQLAlchemy models + engine (MariaDB)
 tasks/               — Celery tasks (download_album, download_playlist)
+tests/               — pytest suite (71 tests across all modules)
 ```
 
 ## Usage
@@ -83,4 +84,4 @@ Set `REQUIRE_AUTH=true` to enforce API key authentication on all endpoints excep
 - Uses the `redis` python client against Valkey (drop-in compatible) with `redis://` URLs
 - `/` in artist/album/song names is replaced with `-` for S3 paths (`zimmporter/postprocessors.py:35-37`)
 - Concurrent downloads share `YTDL_OPTS` global dict; workers modify `outtmpl` per song
-- No local tests exist; verification is manual
+- 71 pytest tests covering core, routes, postprocessors, health, cert — run with `uv run python -m pytest tests/`

@@ -2,6 +2,8 @@
 
 Quick integration test that exercises the full download pipeline: search, queue a download, poll progress, and verify the uploaded files in S3.
 
+> This is the **integration-level** test. For unit/component tests run `uv run python -m pytest tests/` (71 tests, no external services required).
+
 ## Prerequisites
 
 The following tools must be installed on the test machine:

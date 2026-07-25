@@ -129,6 +129,35 @@ Key variables:
 | Auth | `REQUIRE_AUTH` | `false` | Enable API key auth on all routes except `/health` |
 | SSL | `CA_CERT`, `REQUESTS_CA_BUNDLE` | unset | Path to private CA PEM file for HTTPS clients |
 
+## Testing
+
+71 pytest tests across all modules (core, API routes, postprocessors, health, cert). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
+
+```bash
+# Run full suite
+uv run python -m pytest tests/
+
+# Run with coverage
+uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
+
+# E2E test (requires full docker compose stack)
+./e2e_test.sh "Aurora"
+```
+
+### Test layout
+
+| File | Tests | What it covers |
+|---|---|---|
+| `test_cert.py` | 6 | CA cert resolution, SSL config |
+| `test_core.py` | 20 | S3 path building, search, song download |
+| `test_health.py` | 6 | GET /health, degraded state |
+| `test_postprocessors.py` | 7 | EnrichMeta, UploadToS3 |
+| `test_routes_search.py` | 8 | GET /search, caching, validation |
+| `test_routes_download.py` | 11 | POST /download, Celery task dispatch |
+| `test_routes_jobs.py` | 13 | GET /jobs, retry logic |
+
+The DB layer is replaced with SQLite `:memory:` per test via the `sqlite_db` fixture in `tests/conftest.py`.
+
 ## Retention Policy
 
 Jobs and songs older than 30 days are automatically deleted on every successful `/health` check.

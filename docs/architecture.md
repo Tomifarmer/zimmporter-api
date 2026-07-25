@@ -236,6 +236,16 @@ zimmporter-master/
 ├── docs/                    # Documentation
 │   ├── api.md
 │   └── architecture.md
+├── tests/                   # pytest test suite (71 tests)
+│   ├── conftest.py          # Fixtures: SQLite DB, test client, module-level mocks
+│   ├── mock_data.py         # Mock ytmusicapi response data
+│   ├── test_cert.py         # CA cert configuration
+│   ├── test_core.py         # Core search + download logic
+│   ├── test_health.py       # GET /health
+│   ├── test_postprocessors.py  # EnrichMeta, UploadToS3
+│   ├── test_routes_download.py # POST /download
+│   ├── test_routes_jobs.py  # GET /jobs, /retry
+│   └── test_routes_search.py # GET /search
 ├── docker-compose.yml       # Local dev: api, worker, valkey, mariadb
 ├── Dockerfile               # Multi-stage build
 ├── requirements.txt         # Python dependencies
