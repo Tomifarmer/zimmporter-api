@@ -50,7 +50,12 @@ If the configured file does not exist, a warning is logged and the clients fall 
 
 ### Authentication (optional)
 
-Set `REQUIRE_AUTH=true` to enforce API key authentication on all endpoints except `/health`. Clients must send an `X-API-Key` header matching the value of the `API_KEY` env var.
+Two optional authentication methods, controlled by environment variables:
+
+- **API key** — Set `USE_SIMPLE_AUTH=true` and configure `API_KEY`. Clients must send an `X-API-Key` header matching the value.
+- **OIDC Bearer token** — Set `USE_OIDC=true` and configure `OIDC_ISSUER_URL` + `OIDC_CLIENT_ID`. Clients must send an `Authorization: Bearer <JWT>` header validated against the issuer's JWKS endpoint.
+
+The `/health` endpoint is always open. If both methods are enabled, **either** suffices.
 
 ---
 

@@ -7,9 +7,17 @@ all backend components (Valkey, Celery worker, MariaDB) and triggers
 """
 
 import datetime
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Any
+
+logger = logging.getLogger("zimmporter.auth")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
 
 import jwt
 import redis
@@ -52,21 +60,31 @@ _jwks_client: PyJWKClient | None = None
 
 def _get_jwks_client() -> PyJWKClient | None:
     global _jwks_client
-    oidc_enabled = os.environ.get("OIDC_ENABLED", "").lower() == "true"
+    oidc_enabled = os.environ.get("USE_OIDC", "").lower() == "true"
     if not oidc_enabled:
+        logger.warning("OIDC not enabled, skipping JWKS client setup")
         return None
     if _jwks_client is None:
         issuer = os.environ.get("OIDC_ISSUER_URL", "")
         if not issuer:
+            logger.error("OIDC_ISSUER_URL is not set")
             return None
         oidc_config_url = issuer.rstrip("/") + "/.well-known/openid-configuration"
+        logger.info("Fetching OIDC config from %s", oidc_config_url)
         try:
             resp = requests.get(oidc_config_url, timeout=10)
             resp.raise_for_status()
             jwks_uri = resp.json().get("jwks_uri", "")
-            if jwks_uri:
-                _jwks_client = PyJWKClient(jwks_uri, cache_keys=True)
-        except Exception:
+            if not jwks_uri:
+                logger.error("No jwks_uri in OIDC config response")
+                return None
+            logger.info("Found JWKS URI: %s", jwks_uri)
+            _jwks_client = PyJWKClient(jwks_uri, cache_keys=True)
+        except requests.RequestException as e:
+            logger.error("Failed to fetch OIDC config from %s: %s", oidc_config_url, e)
+            return None
+        except Exception as e:
+            logger.error("Unexpected error setting up JWKS client: %s", e)
             return None
     return _jwks_client
 
@@ -77,19 +95,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
     Supports two independent authentication methods, each controlled by its
     own environment variable:
 
-    * **API key** — ``REQUIRE_AUTH=true`` + ``API_KEY``, header ``X-API-Key``.
-    * **OIDC Bearer token** — ``OIDC_ENABLED=true`` + ``OIDC_ISSUER_URL`` +
+    * **API key** — ``USE_SIMPLE_AUTH=true`` + ``API_KEY``, header ``X-API-Key``.
+    * **OIDC Bearer token** — ``USE_OIDC=true`` + ``OIDC_ISSUER_URL`` +
       ``OIDC_CLIENT_ID``, header ``Authorization: Bearer <JWT>``.
 
     If both are enabled, **either** method is sufficient for a request to pass.
     """
 
     async def dispatch(self, request: Request, call_next) -> JSONResponse:
-        if request.url.path == "/health":
+        if request.method == "OPTIONS" or request.url.path == "/health":
             return await call_next(request)
 
-        api_key_enabled = os.environ.get("REQUIRE_AUTH", "").lower() == "true"
-        oidc_enabled = os.environ.get("OIDC_ENABLED", "").lower() == "true"
+        api_key_enabled = os.environ.get("USE_SIMPLE_AUTH", "").lower() == "true"
+        oidc_enabled = os.environ.get("USE_OIDC", "").lower() == "true"
 
         if not api_key_enabled and not oidc_enabled:
             return await call_next(request)
@@ -107,25 +125,37 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # ── OIDC Bearer token check ─────────────────────────────────────
         if oidc_enabled:
             auth_header = request.headers.get("Authorization", "")
+            logger.info("Authorization header present: %s", bool(auth_header))
             if auth_header.startswith("Bearer "):
                 token = auth_header.removeprefix("Bearer ")
+                logger.info("Bearer token length: %d, starts with eyJ (JWT?): %s", len(token), token.startswith("eyJ"))
                 user = _validate_oidc_token(token)
                 if user is not None:
                     request.state.user = user
                     return await call_next(request)
             errors.append("Invalid or missing OIDC token")
 
-        return JSONResponse(status_code=401, content={"detail": "; ".join(errors)})
+        headers = {}
+        origin = request.headers.get("origin")
+        if origin:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Access-Control-Allow-Credentials"] = "true"
+            headers["Access-Control-Allow-Methods"] = "*"
+            headers["Access-Control-Allow-Headers"] = "*"
+        return JSONResponse(status_code=401, content={"detail": "; ".join(errors)}, headers=headers)
 
 
 def _validate_oidc_token(token: str) -> dict[str, Any] | None:
     client = _get_jwks_client()
     if client is None:
+        logger.warning("JWKS client not available, skipping OIDC validation")
         return None
     issuer = os.environ.get("OIDC_ISSUER_URL", "")
     audience = os.environ.get("OIDC_CLIENT_ID", "")
+    logger.info("Validating OIDC token: issuer=%s, audience=%s", issuer, audience)
     try:
         signing_key = client.get_signing_key_from_jwt(token)
+        logger.info("Found signing key for token")
         claims = jwt.decode(
             token,
             signing_key.key,
@@ -134,8 +164,19 @@ def _validate_oidc_token(token: str) -> dict[str, Any] | None:
             issuer=issuer,
             options={"verify_exp": True},
         )
+        logger.info("OIDC token valid, sub=%s, name=%s", claims.get("sub"), claims.get("name"))
         return claims
-    except jwt.PyJWTError:
+    except jwt.ExpiredSignatureError:
+        logger.warning("OIDC token has expired")
+        return None
+    except jwt.InvalidAudienceError:
+        logger.warning("OIDC token audience mismatch (expected %s)", audience)
+        return None
+    except jwt.InvalidIssuerError:
+        logger.warning("OIDC token issuer mismatch (expected %s)", issuer)
+        return None
+    except jwt.PyJWTError as e:
+        logger.warning("OIDC token validation failed: %s", e)
         return None
 
 

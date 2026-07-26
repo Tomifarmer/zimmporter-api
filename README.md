@@ -50,8 +50,11 @@ Optional API key authentication. Set the following environment variables:
 
 | Variable | Description |
 |---|---|
-| `REQUIRE_AUTH` | Set to `"true"` (case-insensitive) to enable. Defaults to disabled. |
-| `API_KEY` | Expected secret value. Clients must send it in the `X-API-Key` header. |
+| `USE_SIMPLE_AUTH` | Set to `"true"` to enable API key auth. Defaults to disabled. |
+| `USE_OIDC` | Set to `"true"` to enable OIDC Bearer token auth. Defaults to disabled. |
+| `API_KEY` | Expected secret value for `X-API-Key` header (only used when `USE_SIMPLE_AUTH=true`). |
+| `OIDC_ISSUER_URL` | OIDC issuer URL for JWKS key resolution (only used when `USE_OIDC=true`). |
+| `OIDC_CLIENT_ID` | Expected `aud` claim in the Bearer token (only used when `USE_OIDC=true`). |
 
 The `/health` endpoint is always open and not subject to authentication.
 
@@ -120,7 +123,8 @@ Key variables:
 | DB | `DB_NAME` | `zimmporter` | Database name |
 | Celery | `CELERY_BROKER` | `redis://localhost:6379/0` | Broker URL (works with Valkey) |
 | S3 | `AWS_ENDPOINT_URL` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_BUCKET` / `AWS_USE_SSL` / `AWS_DEFAULT_REGION` | — | S3-compatible storage credentials |
-| Auth | `REQUIRE_AUTH` | `false` | Enable API key auth on all routes except `/health` |
+| Auth | `USE_SIMPLE_AUTH` | `false` | Enable API key auth on all routes except `/health` |
+| Auth | `USE_OIDC` | `false` | Enable OIDC Bearer token auth on all routes except `/health` |
 | SSL | `CA_CERT`, `REQUESTS_CA_BUNDLE` | unset | Path to private CA PEM file for HTTPS clients |
 
 ## Testing
