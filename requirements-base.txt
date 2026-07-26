@@ -1,4 +1,5 @@
 celery[redis]>=5.3,<6.0
+PyJWT[crypto]>=2.9,<3.0
 pymysql>=1.1
 requests>=2.34.2
 sqlalchemy>=2.0,<3.0

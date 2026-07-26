@@ -50,8 +50,12 @@ Optional API key authentication. Set the following environment variables:
 
 | Variable | Description |
 |---|---|
-| `REQUIRE_AUTH` | Set to `"true"` (case-insensitive) to enable. Defaults to disabled. |
-| `API_KEY` | Expected secret value. Clients must send it in the `X-API-Key` header. |
+| `USE_SIMPLE_AUTH` | Set to `"true"` to enable API key auth. Defaults to disabled. |
+| `USE_SOCIAL_LOGIN` | Set to `"true"` to enable social login Bearer token auth (OIDC/GitHub). Defaults to disabled. |
+| `API_KEY` | Expected secret value for `X-API-Key` header (only used when `USE_SIMPLE_AUTH=true`). |
+| `OIDC_ISSUER_URL` | OIDC issuer URL for JWKS key resolution (only used when `USE_SOCIAL_LOGIN=true`). |
+| `OIDC_CLIENT_ID` | Expected `aud` claim in the Bearer token (only used when `USE_SOCIAL_LOGIN=true`). |
+| `GITHUB_CLIENT_ID` | When set, enables GitHub Bearer token validation via the GitHub API (only used when `USE_SOCIAL_LOGIN=true`). |
 
 The `/health` endpoint is always open and not subject to authentication.
 
@@ -120,12 +124,14 @@ Key variables:
 | DB | `DB_NAME` | `zimmporter` | Database name |
 | Celery | `CELERY_BROKER` | `redis://localhost:6379/0` | Broker URL (works with Valkey) |
 | S3 | `AWS_ENDPOINT_URL` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_BUCKET` / `AWS_USE_SSL` / `AWS_DEFAULT_REGION` | — | S3-compatible storage credentials |
-| Auth | `REQUIRE_AUTH` | `false` | Enable API key auth on all routes except `/health` |
+| Auth | `USE_SIMPLE_AUTH` | `false` | Enable API key auth on all routes except `/health` |
+| Auth | `USE_SOCIAL_LOGIN` | `false` | Enable social login Bearer token auth (OIDC/GitHub) on all routes except `/health` |
+| Auth | `GITHUB_CLIENT_ID` | unset | Enables GitHub Bearer token validation via GitHub API (requires `USE_SOCIAL_LOGIN=true`) |
 | SSL | `CA_CERT`, `REQUESTS_CA_BUNDLE` | unset | Path to private CA PEM file for HTTPS clients |
 
 ## Testing
 
-71 pytest tests across all modules (core, API routes, postprocessors, health, cert). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
+88 pytest tests across all modules (core, API routes, auth, postprocessors, health, cert). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
 
 ```bash
 # Run full suite
@@ -142,6 +148,7 @@ uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
 
 | File | Tests | What it covers |
 |---|---|---|
+| `test_auth.py` | 17 | API key + OIDC authentication middleware |
 | `test_cert.py` | 6 | CA cert resolution, SSL config |
 | `test_core.py` | 20 | S3 path building, search, song download |
 | `test_health.py` | 6 | GET /health, degraded state |
@@ -151,6 +158,19 @@ uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
 | `test_routes_jobs.py` | 13 | GET /jobs, retry logic |
 
 The DB layer is replaced with SQLite `:memory:` per test via the `sqlite_db` fixture in `tests/conftest.py`.
+
+## CI
+
+GitHub Actions workflow at `.github/workflows/build.yml`:
+
+| Event | Tests | Build | Push image | Trivy scan |
+|---|---|---|---|---|
+| Push `main` | ✅ | — | — | — |
+| Push `feature/*` | ✅ | ✅ | `feature-*-{alpine,debian}` | — |
+| Push tag `v*` | ✅ | ✅ | `latest`, `alpine`, `debian`, semver | ✅ |
+| PR to `main` | ✅ | — | — | — |
+
+The `test` job runs `uv run python -m pytest tests/ -v` on every trigger. The `build` job is gated to only build on tag or `feature/*` pushes; production tags (`latest`, `alpine`, `debian`, semver`) are only pushed on version tags, never from feature branches.
 
 ## Retention Policy
 

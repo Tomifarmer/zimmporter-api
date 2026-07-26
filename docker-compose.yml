@@ -49,7 +49,8 @@ services:
       - AWS_USE_SSL=false
       - AWS_BUCKET=test
       - AWS_DEFAULT_REGION=us-east-1
-      - REQUIRE_AUTH=false
+    env_file:
+      - .env.local
     volumes:
       - zimmer_data:/data/zimmer/importer
     depends_on:

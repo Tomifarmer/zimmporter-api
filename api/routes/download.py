@@ -7,7 +7,7 @@ immediately with the ``job_id`` so callers can poll ``GET
 /jobs/{job_id}`` for progress.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from api.models import DownloadRequest, JobResponse
 from db.engine import get_session
@@ -17,8 +17,20 @@ from tasks.download import download_album, download_playlist
 download_router = APIRouter(prefix="/download", tags=["download"])
 
 
+def _get_requested_by(request: Request) -> str | None:
+    """Extract the requesting user's name from an authenticated request.
+
+    Returns ``None`` when auth is disabled or the request was authenticated
+    via API key.
+    """
+    user = request.scope.get("user")
+    if user is None:
+        return None
+    return user.get("name") or user.get("sub")
+
+
 @download_router.post("/album", response_model=JobResponse)
-def album_download(req: DownloadRequest) -> JobResponse:
+def album_download(req: DownloadRequest, request: Request) -> JobResponse:
     """Queue one or more albums for download.
 
     A ``Job`` row is inserted with status ``pending``, then
@@ -27,6 +39,7 @@ def album_download(req: DownloadRequest) -> JobResponse:
 
     Args:
         req: Album browse ID(s) and desired concurrency.
+        request: FastAPI request (used to extract the authenticated user).
 
     Returns:
         The new ``job_id`` (always with status ``"pending"``).
@@ -38,6 +51,7 @@ def album_download(req: DownloadRequest) -> JobResponse:
             browse_id=req.id,
             status="pending",
             message="Queued",
+            requested_by=_get_requested_by(request),
         )
         session.add(job)
         session.flush()
@@ -48,7 +62,7 @@ def album_download(req: DownloadRequest) -> JobResponse:
 
 
 @download_router.post("/playlist", response_model=JobResponse)
-def playlist_download(req: DownloadRequest) -> JobResponse:
+def playlist_download(req: DownloadRequest, request: Request) -> JobResponse:
     """Queue one or more playlists for download.
 
     Same flow as :func:`album_download` but dispatches
@@ -56,6 +70,7 @@ def playlist_download(req: DownloadRequest) -> JobResponse:
 
     Args:
         req: Playlist browse ID(s) and desired concurrency.
+        request: FastAPI request (used to extract the authenticated user).
 
     Returns:
         The new ``job_id`` (always with status ``"pending"``).
@@ -67,6 +82,7 @@ def playlist_download(req: DownloadRequest) -> JobResponse:
             browse_id=req.id,
             status="pending",
             message="Queued",
+            requested_by=_get_requested_by(request),
         )
         session.add(job)
         session.flush()

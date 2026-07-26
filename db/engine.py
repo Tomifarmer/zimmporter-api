@@ -46,16 +46,27 @@ def migrate_schema() -> None:
     from sqlalchemy import text as sa_text
 
     inspector = inspect(engine)
-    existing_columns = {col["name"] for col in inspector.get_columns("songs")}
 
-    additions = {
+    song_additions = {
         "release_date": "ALTER TABLE songs ADD COLUMN release_date DATE NULL",
         "s3_path": "ALTER TABLE songs ADD COLUMN s3_path VARCHAR(1024) NULL",
     }
 
+    existing_song_columns = {col["name"] for col in inspector.get_columns("songs")}
     with engine.connect() as conn:
-        for col, ddl in additions.items():
-            if col not in existing_columns:
+        for col, ddl in song_additions.items():
+            if col not in existing_song_columns:
+                conn.execute(sa_text(ddl))
+        conn.commit()
+
+    job_additions = {
+        "requested_by": "ALTER TABLE jobs ADD COLUMN requested_by VARCHAR(256) NULL",
+    }
+
+    existing_job_columns = {col["name"] for col in inspector.get_columns("jobs")}
+    with engine.connect() as conn:
+        for col, ddl in job_additions.items():
+            if col not in existing_job_columns:
                 conn.execute(sa_text(ddl))
         conn.commit()
 
