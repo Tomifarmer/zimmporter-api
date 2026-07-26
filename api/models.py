@@ -90,6 +90,7 @@ class JobStatusResponse(BaseModel):
         total_songs: Total songs in the current album.
         album_name: Original album or playlist title (raw, unformatted).
         artist: Artist name (NULL for playlists).
+        requested_by: Name of the OIDC user who requested the job, if authenticated via Bearer token.
         created_at: UTC datetime when the job was created.
         updated_at: Last UTC update timestamp.
         songs_downloaded: Count of songs with status ``"success"``.
@@ -109,6 +110,7 @@ class JobStatusResponse(BaseModel):
     total_songs: int = 0
     artist: str | None = None
     album_name: str | None = None
+    requested_by: str | None = None
     created_at: dt.datetime | None = None
     updated_at: dt.datetime | None = None
     songs_downloaded: int = Field(default=0, description="Number of songs with status ``success``")
