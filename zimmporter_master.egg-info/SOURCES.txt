@@ -14,7 +14,6 @@ requirements-base.txt
 requirements-worker.txt
 requirements.txt
 uv.lock
-zimmporter.sh
 .github/dependabot.yml
 .github/workflows/build.yml
 api/__init__.py
@@ -36,6 +35,7 @@ tasks/download.py
 tests/__init__.py
 tests/conftest.py
 tests/mock_data.py
+tests/test_auth.py
 tests/test_cert.py
 tests/test_core.py
 tests/test_health.py
@@ -44,7 +44,6 @@ tests/test_routes_download.py
 tests/test_routes_jobs.py
 tests/test_routes_search.py
 zimmporter/__init__.py
-zimmporter/__main__.py
 zimmporter/_version.py
 zimmporter/cert.py
 zimmporter/core.py

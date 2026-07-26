@@ -3,6 +3,7 @@ fastapi<1.0,>=0.110
 boto3>=1.34.0
 mutagen>=1.48.1
 pydantic<3.0,>=2.0
+PyJWT[crypto]<3.0,>=2.9
 pymysql>=1.1
 requests>=2.34.2
 sqlalchemy<3.0,>=2.0
