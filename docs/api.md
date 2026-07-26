@@ -237,6 +237,12 @@ Returns the current status of a specific job with embedded per-song statuses.  P
   "total_albums": 1,
   "current_song": 3,
   "total_songs": 12,
+  "requested_by": "user@example.com",
+  "artist": "Artist Name",
+  "album_name": "Album Name",
+  "songs_downloaded": 2,
+  "created_at": "2025-01-15T12:00:00+00:00",
+  "updated_at": "2025-01-15T12:05:00+00:00",
   "songs": [
     {
       "id": 100,
@@ -251,6 +257,17 @@ Returns the current status of a specific job with embedded per-song statuses.  P
   ]
 }
 ```
+
+Additional fields on `JobStatusResponse`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requested_by` | string \| null | Name or sub of the OIDC user who requested the job (`null` for API-key or unauthenticated requests) |
+| `artist` | string \| null | Artist name (`null` for playlists) |
+| `album_name` | string \| null | Original album/playlist title (raw, unformatted) |
+| `songs_downloaded` | int | Count of songs with status `"success"` |
+| `created_at` | string \| null | ISO 8601 UTC timestamp of job creation |
+| `updated_at` | string \| null | ISO 8601 UTC timestamp of last update |
 
 ---
 
@@ -270,6 +287,40 @@ Returns recent jobs newest-first, each with embedded song statuses.
 | `offset` | int | `0` | Number of jobs to skip |
 
 **Response:** List of `JobStatusResponse` objects (same schema as `GET /jobs/{job_id}`).
+
+When authenticated via Bearer token (OIDC user), only the requesting user's jobs are returned. Unauthenticated or API-key-authenticated requests return all jobs.
+
+---
+
+### Retry Job
+
+```
+POST /jobs/{job_id}/retry
+```
+
+Resets all failed songs in a job to `pending` (clearing their error messages) and re-dispatches the original Celery task. Ownership check applies: returns `403` if the job belongs to a different OIDC user.
+
+**Path Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `job_id` | int | ID of the job to retry |
+
+**Response:**
+```json
+{
+  "job_id": 42,
+  "status": "running"
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|--------|-----------|
+| `404` | Job not found |
+| `400` | No failed songs to retry |
+| `403` | Job belongs to a different OIDC user |
 
 ---
 
@@ -297,9 +348,9 @@ Celery worker picks up task
 | Status | Meaning |
 |--------|---------|
 | `pending` | Job created, waiting for Celery worker |
-| `running` | Worker is processing songs |
+| `running` | Worker is processing songs (or retrying after `POST /jobs/{job_id}/retry`) |
 | `success` | All albums/playlists processed |
-| `failed` | Unrecoverable error occurred |
+| `failed` | Unrecoverable error occurred (retryable via `POST /jobs/{job_id}/retry`) |
 
 ### Song Statuses
 
