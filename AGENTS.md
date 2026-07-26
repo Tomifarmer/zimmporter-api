@@ -39,7 +39,7 @@ curl -s "http://localhost:8000/health" | jq .
 ```
 
 ## Authentication (optional)
-Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API-Key` header matching `API_KEY`), or set `USE_OIDC=true` to require an OIDC Bearer token (`Authorization: Bearer <JWT>` validated against `OIDC_ISSUER_URL`/`OIDC_CLIENT_ID`). Either suffices when both are enabled.
+Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API-Key` header matching `API_KEY`), or set `USE_SOCIAL_LOGIN=true` to require a Bearer token (`Authorization: Bearer <JWT>` validated against `OIDC_ISSUER_URL`/`OIDC_CLIENT_ID`, or a GitHub token validated against the GitHub API). Either suffices when both are enabled.
 
 ## Runtime requirements
 - **Python 3.14+**, dependencies split across requirement files:
@@ -62,7 +62,7 @@ Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API
 - `api/routes/search.py` — `GET /search` calls `Zimmporter.search()` synchronously; supports `limit` (1-50); results cached in Valkey db 2 with 5 min TTL
 - `api/routes/download.py` — `POST /download/album|/playlist` creates DB Job row, then triggers Celery task
 - `api/routes/jobs.py` — `GET /jobs/<id>` reads Job + Song rows from DB
-- `api/app.py` — `GET /health` checks API, Valkey connectivity, Celery worker liveness, and MariaDB; always returns HTTP 200 with `"status": "ok"` or `"degraded"` to report partial outages without breaking callers; also purges jobs older than 30 days; `AuthMiddleware` adds optional auth (`USE_SIMPLE_AUTH`/`USE_OIDC` env vars) to all routes except `/health`
+- `api/app.py` — `GET /health` checks API, Valkey connectivity, Celery worker liveness, and MariaDB; always returns HTTP 200 with `"status": "ok"` or `"degraded"` to report partial outages without breaking callers; also purges jobs older than 30 days; `AuthMiddleware` adds optional auth (`USE_SIMPLE_AUTH`/`USE_SOCIAL_LOGIN` env vars) to all routes except `/health`
 - `tasks/download.py` — Celery tasks wrap `download_bulk` with `billiard.Pool`. Updates task state per song for progress tracking.
 - Logger + `YTDL_OPTS` mutated on module level — reinitialized in each forked worker because state is lost after `billiard.Pool` fork
 

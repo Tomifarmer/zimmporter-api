@@ -60,8 +60,8 @@ _jwks_client: PyJWKClient | None = None
 
 def _get_jwks_client() -> PyJWKClient | None:
     global _jwks_client
-    oidc_enabled = os.environ.get("USE_OIDC", "").lower() == "true"
-    if not oidc_enabled:
+    social_login_enabled = os.environ.get("USE_SOCIAL_LOGIN", "").lower() == "true"
+    if not social_login_enabled:
         logger.warning("OIDC not enabled, skipping JWKS client setup")
         return None
     if _jwks_client is None:
@@ -92,14 +92,19 @@ def _get_jwks_client() -> PyJWKClient | None:
 class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware that enforces authentication on all routes except ``/health``.
 
-    Supports two independent authentication methods, each controlled by its
-    own environment variable:
+    Supports three independent authentication methods, each controlled by
+    its own environment variable:
 
     * **API key** — ``USE_SIMPLE_AUTH=true`` + ``API_KEY``, header ``X-API-Key``.
-    * **OIDC Bearer token** — ``USE_OIDC=true`` + ``OIDC_ISSUER_URL`` +
-      ``OIDC_CLIENT_ID``, header ``Authorization: Bearer <JWT>``.
+    * **OIDC Bearer token** — ``USE_SOCIAL_LOGIN=true`` enables OIDC (Google) +
+      bearer token validation; ``OIDC_ISSUER_URL`` + ``OIDC_CLIENT_ID`` control
+      the JWKS validation, header ``Authorization: Bearer <JWT>``.
+    * **GitHub Bearer token** — ``GITHUB_CLIENT_ID`` must be set; validates
+      the token against the GitHub API.
 
-    If both are enabled, **either** method is sufficient for a request to pass.
+    When a Bearer token is provided, OIDC JWKS validation is tried first,
+    then GitHub API validation as a fallback.  If both are enabled,
+    **any** method alone is sufficient for a request to pass.
     """
 
     async def dispatch(self, request: Request, call_next) -> JSONResponse:
@@ -107,9 +112,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         api_key_enabled = os.environ.get("USE_SIMPLE_AUTH", "").lower() == "true"
-        oidc_enabled = os.environ.get("USE_OIDC", "").lower() == "true"
+        social_login_enabled = os.environ.get("USE_SOCIAL_LOGIN", "").lower() == "true"
+        github_enabled = bool(os.environ.get("GITHUB_CLIENT_ID", ""))
 
-        if not api_key_enabled and not oidc_enabled:
+        if not api_key_enabled and not social_login_enabled and not github_enabled:
             return await call_next(request)
 
         errors: list[str] = []
@@ -122,18 +128,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
             errors.append("Invalid or missing API key")
 
-        # ── OIDC Bearer token check ─────────────────────────────────────
-        if oidc_enabled:
+        # ── Bearer token check (OIDC first, then GitHub fallback) ───────
+        bearer_enabled = social_login_enabled or github_enabled
+        if bearer_enabled:
             auth_header = request.headers.get("Authorization", "")
             logger.info("Authorization header present: %s", bool(auth_header))
             if auth_header.startswith("Bearer "):
                 token = auth_header.removeprefix("Bearer ")
-                logger.info("Bearer token length: %d, starts with eyJ (JWT?): %s", len(token), token.startswith("eyJ"))
-                user = _validate_oidc_token(token)
+                logger.info("Bearer token length: %d", len(token))
+
+                user = None
+                if social_login_enabled:
+                    user = _validate_oidc_token(token)
+                if user is None and github_enabled:
+                    user = _validate_github_token(token)
                 if user is not None:
-                    request.state.user = user
+                    request.scope["user"] = user
                     return await call_next(request)
-            errors.append("Invalid or missing OIDC token")
+
+            errors.append("Invalid or missing authentication token")
 
         headers = {}
         origin = request.headers.get("origin")
@@ -177,6 +190,50 @@ def _validate_oidc_token(token: str) -> dict[str, Any] | None:
         return None
     except jwt.PyJWTError as e:
         logger.warning("OIDC token validation failed: %s", e)
+        return None
+
+
+def _validate_github_token(token: str) -> dict[str, Any] | None:
+    """Validate a Bearer token against the GitHub API.
+
+    Calls ``GET https://api.github.com/user`` with the token.  On success
+    returns a dict with ``sub``, ``name``, ``email``, and ``provider`` set
+    to ``"github"`` so downstream code (e.g. ``_get_requested_by``) can
+    use it consistently with OIDC claims.
+
+    Returns ``None`` when ``GITHUB_CLIENT_ID`` is not set (GitHub auth
+    not configured), the API returns non-200, or the response lacks a
+    ``login`` field.
+    """
+    client_id = os.environ.get("GITHUB_CLIENT_ID", "")
+    if not client_id:
+        return None
+    try:
+        resp = requests.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github.v3+json",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning("GitHub token validation failed: HTTP %d", resp.status_code)
+            return None
+        data = resp.json()
+        login = data.get("login")
+        if not login:
+            logger.warning("GitHub token validation failed: no login in response")
+            return None
+        logger.info("GitHub token valid, user=%s", login)
+        return {
+            "sub": login,
+            "name": data.get("name") or login,
+            "email": data.get("email"),
+            "provider": "github",
+        }
+    except requests.RequestException as e:
+        logger.warning("GitHub token validation request failed: %s", e)
         return None
 
 

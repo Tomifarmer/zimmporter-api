@@ -53,9 +53,10 @@ If the configured file does not exist, a warning is logged and the clients fall 
 Two optional authentication methods, controlled by environment variables:
 
 - **API key** — Set `USE_SIMPLE_AUTH=true` and configure `API_KEY`. Clients must send an `X-API-Key` header matching the value.
-- **OIDC Bearer token** — Set `USE_OIDC=true` and configure `OIDC_ISSUER_URL` + `OIDC_CLIENT_ID`. Clients must send an `Authorization: Bearer <JWT>` header validated against the issuer's JWKS endpoint.
+- **OIDC Bearer token** — Set `USE_SOCIAL_LOGIN=true` and configure `OIDC_ISSUER_URL` + `OIDC_CLIENT_ID`. Clients must send an `Authorization: Bearer <JWT>` header validated against the issuer's JWKS endpoint.
+- **GitHub Bearer token** — Set `USE_SOCIAL_LOGIN=true` and `GITHUB_CLIENT_ID`. Clients must send an `Authorization: Bearer <token>` header validated against the GitHub API.
 
-The `/health` endpoint is always open. If both methods are enabled, **either** suffices.
+The `/health` endpoint is always open. If multiple methods are enabled, **any** suffices.
 
 ---
 

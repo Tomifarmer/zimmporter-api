@@ -18,12 +18,12 @@ download_router = APIRouter(prefix="/download", tags=["download"])
 
 
 def _get_requested_by(request: Request) -> str | None:
-    """Extract the requesting user's name from an OIDC-authenticated request.
+    """Extract the requesting user's name from an authenticated request.
 
     Returns ``None`` when auth is disabled or the request was authenticated
-    via API key (neither case sets ``request.state.user``).
+    via API key.
     """
-    user = getattr(request.state, "user", None)
+    user = request.scope.get("user")
     if user is None:
         return None
     return user.get("name") or user.get("sub")

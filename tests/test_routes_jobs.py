@@ -2,12 +2,13 @@ from db.engine import get_session
 from db.models import Job, Song
 
 
-def _create_job(session, job_type="album", browse_id="MPREb_test", status="pending"):
+def _create_job(session, job_type="album", browse_id="MPREb_test", status="pending", requested_by=None):
     job = Job(
         job_type=job_type,
         browse_id=browse_id,
         status=status,
         message="Test job",
+        requested_by=requested_by,
     )
     session.add(job)
     session.flush()
@@ -115,6 +116,41 @@ class TestListJobs:
         resp = test_client.get("/jobs?limit=10&offset=2")
         data = resp.json()
         assert len(data) == 3
+
+
+class TestListJobsFiltered:
+    """Tests verifying that jobs are filtered by the authenticated user."""
+
+    def test_authenticated_user_sees_own_jobs(self, test_client, monkeypatch, mocker):
+        monkeypatch.setenv("GITHUB_CLIENT_ID", "my-client")
+
+        mocker.patch(
+            "api.app._validate_github_token",
+            return_value={"sub": "octocat", "name": "Octocat", "provider": "github"},
+        )
+
+        with get_session() as session:
+            _create_job(session, browse_id="my-job", requested_by="Octocat")
+            _create_job(session, browse_id="other-job", requested_by="someone-else")
+
+        resp = test_client.get(
+            "/jobs",
+            headers={"Authorization": "Bearer ghs_octocat_token"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["browse_id"] == "my-job"
+
+    def test_unauthenticated_user_sees_all_jobs(self, test_client):
+        with get_session() as session:
+            _create_job(session, browse_id="my-job", requested_by="Octocat")
+            _create_job(session, browse_id="other-job", requested_by="someone-else")
+
+        resp = test_client.get("/jobs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
 
 
 class TestRetryJob:

@@ -16,8 +16,8 @@ jobs_router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 def _get_requested_by(request: Request) -> str | None:
-    """Extract the requesting user's name from an OIDC-authenticated request."""
-    user = getattr(request.state, "user", None)
+    """Extract the requesting user's name from an authenticated request."""
+    user = request.scope.get("user")
     if user is None:
         return None
     return user.get("name") or user.get("sub")

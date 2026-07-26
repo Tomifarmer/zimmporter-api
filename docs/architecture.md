@@ -186,7 +186,7 @@ When set, all HTTPS clients (requests for thumbnails, boto3/S3, yt-dlp, ytmusica
 |----------|---------|-------------|
 | `USE_SIMPLE_AUTH` | `false` | Enable API key auth (`X-API-Key` header) on all endpoints except `/health` |
 | `API_KEY` | *(none)* | Expected secret value for `X-API-Key` header |
-| `USE_OIDC` | `false` | Enable OIDC Bearer token auth (`Authorization: Bearer`) on all endpoints except `/health` |
+| `USE_SOCIAL_LOGIN` | `false` | Enable social login Bearer token auth (OIDC/GitHub) on all endpoints except `/health` |
 | `OIDC_ISSUER_URL` | *(none)* | OIDC issuer URL for JWKS key resolution |
 | `OIDC_CLIENT_ID` | *(none)* | Expected `aud` claim in the Bearer token |
 
