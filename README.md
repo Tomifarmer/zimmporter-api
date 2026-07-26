@@ -125,7 +125,7 @@ Key variables:
 
 ## Testing
 
-71 pytest tests across all modules (core, API routes, postprocessors, health, cert). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
+88 pytest tests across all modules (core, API routes, auth, postprocessors, health, cert). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
 
 ```bash
 # Run full suite
@@ -142,6 +142,7 @@ uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
 
 | File | Tests | What it covers |
 |---|---|---|
+| `test_auth.py` | 17 | API key + OIDC authentication middleware |
 | `test_cert.py` | 6 | CA cert resolution, SSL config |
 | `test_core.py` | 20 | S3 path building, search, song download |
 | `test_health.py` | 6 | GET /health, degraded state |
@@ -151,6 +152,19 @@ uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
 | `test_routes_jobs.py` | 13 | GET /jobs, retry logic |
 
 The DB layer is replaced with SQLite `:memory:` per test via the `sqlite_db` fixture in `tests/conftest.py`.
+
+## CI
+
+GitHub Actions workflow at `.github/workflows/build.yml`:
+
+| Event | Tests | Build | Push image | Trivy scan |
+|---|---|---|---|---|
+| Push `main` | ✅ | — | — | — |
+| Push `feature/*` | ✅ | ✅ | `feature-*-{alpine,debian}` | — |
+| Push tag `v*` | ✅ | ✅ | `latest`, `alpine`, `debian`, semver | ✅ |
+| PR to `main` | ✅ | — | — | — |
+
+The `test` job runs `uv run python -m pytest tests/ -v` on every trigger. The `build` job is gated to only build on tag or `feature/*` pushes; production tags (`latest`, `alpine`, `debian`, semver`) are only pushed on version tags, never from feature branches.
 
 ## Retention Policy
 

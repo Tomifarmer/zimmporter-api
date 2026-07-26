@@ -184,8 +184,13 @@ When set, all HTTPS clients (requests for thumbnails, boto3/S3, yt-dlp, ytmusica
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REQUIRE_AUTH` | `false` | Enable API key authentication on all endpoints except `/health` |
+| `REQUIRE_AUTH` | `false` | Enable API key auth (`X-API-Key` header) on all endpoints except `/health` |
 | `API_KEY` | *(none)* | Expected secret value for `X-API-Key` header |
+| `OIDC_ENABLED` | `false` | Enable OIDC Bearer token auth (`Authorization: Bearer`) on all endpoints except `/health` |
+| `OIDC_ISSUER_URL` | *(none)* | OIDC issuer URL for JWKS key resolution |
+| `OIDC_CLIENT_ID` | *(none)* | Expected `aud` claim in the Bearer token |
+
+Both auth methods can be enabled independently; providing valid credentials for either method suffices.
 
 ## Retention Policy
 
@@ -233,10 +238,13 @@ zimmporter-master/
 │   ├── __init__.py
 │   ├── celery_app.py        # Celery configuration
 │   └── download.py          # download_album / download_playlist tasks
+├── .github/                 # GitHub Actions
+│   └── workflows/
+│       └── build.yml        # Test + build + push to GHCR
 ├── docs/                    # Documentation
 │   ├── api.md
 │   └── architecture.md
-├── tests/                   # pytest test suite (71 tests)
+├── tests/                   # pytest test suite (88 tests)
 │   ├── conftest.py          # Fixtures: SQLite DB, test client, module-level mocks
 │   ├── mock_data.py         # Mock ytmusicapi response data
 │   ├── test_cert.py         # CA cert configuration
