@@ -43,12 +43,6 @@ services:
       - DB_USER=root
       - DB_PASS=root
       - DB_NAME=zimmporter
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test123456789
-      - AWS_ENDPOINT_URL=http://192.168.2.250:9000
-      - AWS_USE_SSL=false
-      - AWS_BUCKET=test
-      - AWS_DEFAULT_REGION=us-east-1
     env_file:
       - .env.local
     volumes:
