@@ -37,6 +37,7 @@ YTDL_OPTS = {
     "addmetadata": True,
     "writethumbnail": True,
     "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
+    "cachedir": "/tmp/yt-dlp-cache",
     # Skip any downloads that resulted in incomplete files.  With concurrent threads
     # writing to the same temp_dir this prevents a thread from trying to postprocess
     # a .webm file that another thread has already deleted or overwritten.

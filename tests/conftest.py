@@ -96,6 +96,7 @@ def _reset_ytdl_opts():
             "addmetadata": True,
             "writethumbnail": True,
             "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
+            "cachedir": "/tmp/yt-dlp-cache",
             "skip_download_incomplete_files": True,
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "aac", "preferredquality": "best"},
