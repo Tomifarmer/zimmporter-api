@@ -14,7 +14,7 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 COPY --from=deno /bin/deno /usr/local/bin/deno
 RUN apk upgrade --no-cache && \
     rm /usr/local/bin/uv && \
-    apk add --no-cache ffmpeg && \
+    apk add --no-cache ffmpeg gcompat && \
     addgroup -S zimmporter -g 51000 && \
     adduser -S -G zimmporter -u 51000 -h /zimmer zimmporter && \
     mkdir -p /etc/ssl/certs /data/zimmer/importer
