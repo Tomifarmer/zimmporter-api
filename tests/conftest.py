@@ -95,7 +95,7 @@ def _reset_ytdl_opts():
             "format": "bestaudio",
             "addmetadata": True,
             "writethumbnail": True,
-            "js-runtime": "/usr/local/bin/deno",
+            "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
             "skip_download_incomplete_files": True,
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "aac", "preferredquality": "best"},
