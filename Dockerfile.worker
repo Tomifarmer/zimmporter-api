@@ -10,7 +10,7 @@ RUN apt update && apt upgrade --no-install-recommends -y && \
     useradd -r -g zimmporter -u 51000 -d /zimmer zimmporter && \
     mkdir -p /etc/ssl/certs /data/zimmer/importer
 
-COPY --from=deno /deno /usr/local/bin/deno
+COPY --from=deno /deno /usr/bin/deno
 
 WORKDIR /zimmer/
 

@@ -47,7 +47,7 @@ Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API
   - `requirements-base.txt` — shared minimal deps (ytmusicapi, celery, sqlalchemy, pymysql, requests)
   - `requirements-worker.txt` — worker container (same as base + yt-dlp, boto3, mutagen)
 - **ffmpeg** (system-level, worker container only)
-- **Deno binary** at `/usr/local/bin/deno` (worker container only)
+- **Deno binary** at `/usr/bin/deno` (worker container only)
 - **Valkey** for Celery broker/backend (docker compose provides this); uses `redis://` URL scheme with the `redis` python client
 - **MariaDB** for job + song tracking (docker compose provides this); env vars `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME
 - **S3** configured via env vars: `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`

@@ -36,7 +36,7 @@ YTDL_OPTS = {
     # "extractor_args": {"youtube": ["player-client=web_embedded,web,tv"]},
     "addmetadata": True,
     "writethumbnail": True,
-    "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
+    "js_runtimes": {"deno": {"path": "/usr/bin/deno"}},
     "cachedir": "/tmp/yt-dlp-cache",
     # Skip any downloads that resulted in incomplete files.  With concurrent threads
     # writing to the same temp_dir this prevents a thread from trying to postprocess
