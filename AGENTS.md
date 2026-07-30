@@ -62,7 +62,7 @@ Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API
 - `api/routes/search.py` — `GET /search` calls `Zimmporter.search()` synchronously; supports `limit` (1-50); results cached in Valkey db 2 with 5 min TTL
 - `api/routes/download.py` — `POST /download/album|/playlist` creates DB Job row, then triggers Celery task
 - `api/routes/jobs.py` — `GET /jobs/<id>` reads Job + Song rows from DB
-- `api/app.py` — `GET /health` checks API, Valkey connectivity, Celery worker liveness, and MariaDB; always returns HTTP 200 with `"status": "ok"` or `"degraded"` to report partial outages without breaking callers; also purges jobs older than `JOB_RETENTION_DAYS` (default 0 = never purge); `AuthMiddleware` adds optional auth (`USE_SIMPLE_AUTH`/`USE_SOCIAL_LOGIN` env vars) to all routes except `/health`
+- `api/app.py` — `GET /health` checks API, Valkey connectivity, Celery worker liveness, and MariaDB; always returns HTTP 200 with `"status": "ok"` or `"degraded"` to report partial outages without breaking callers; also purges jobs older than `JOB_RETENTION_DAYS` (default 0 = never purge) and fails stalled jobs via `_fail_stalled_jobs()` (controlled by `JOB_STALLED_TIMEOUT`, default 5m); `AuthMiddleware` adds optional auth (`USE_SIMPLE_AUTH`/`USE_SOCIAL_LOGIN` env vars) to all routes except `/health`
 - `tasks/download.py` — Celery tasks wrap `download_bulk` with `billiard.Pool`. Updates task state per song for progress tracking.
 - Logger + `YTDL_OPTS` mutated on module level — reinitialized in each forked worker because state is lost after `billiard.Pool` fork
 

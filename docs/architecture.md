@@ -223,7 +223,7 @@ zimmporter-master/
 │   └── ytdlp_logger.py      # Custom logger with album/song context
 ├── api/                     # FastAPI application
 │   ├── __init__.py
-│   ├── app.py               # FastAPI app, /health, configurable job retention cleanup
+│   ├── app.py               # FastAPI app, /health, job retention + stalled-job cleanup
 │   ├── models.py            # Pydantic models
 │   └── routes/
 │       ├── __init__.py

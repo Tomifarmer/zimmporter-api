@@ -175,3 +175,5 @@ The `test` job runs `uv run python -m pytest tests/ -v` on every trigger. The `b
 ## Retention Policy
 
 Jobs and songs are automatically deleted after the number of days set via the `JOB_RETENTION_DAYS` environment variable (default `0` — never purge). The cleanup runs on every successful `/health` check.
+
+Jobs stuck in `pending`/`running` for longer than `JOB_STALLED_TIMEOUT` minutes (default `5`) are automatically marked as `failed` — this handles worker crashes where the task's exception handler never runs.

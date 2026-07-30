@@ -3,7 +3,8 @@
 Creates the :class:`FastAPI` instance, mounts route modules, initializes
 the database on startup, and exposes a ``/health`` endpoint that validates
 all backend components (Valkey, Celery worker, MariaDB) and triggers
-configurable job retention cleanup (``JOB_RETENTION_DAYS``, default 0).
+configurable job retention cleanup (``JOB_RETENTION_DAYS``, default 0)
+and stalled-job detection (``JOB_STALLED_TIMEOUT``, default 5 minutes).
 """
 
 import datetime
@@ -299,6 +300,7 @@ def health() -> dict:
 
     if not all_components_down:
         _clean_old_jobs()
+        _fail_stalled_jobs()
 
     return {
         "status": "degraded" if healthy_count < len(components) else "ok",
@@ -324,5 +326,39 @@ def _clean_old_jobs() -> None:
             cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=retention_days)
             session.query(Job).filter(Job.created_at < cutoff).delete(synchronize_session=False)
             session.query(Song).filter(Song.created_at < cutoff).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+
+def _fail_stalled_jobs() -> None:
+    """Mark jobs stuck in ``pending``/``running`` for > N minutes as failed.
+
+    When a Celery worker crashes (OOM, ``SIGKILL``, node failure) the task
+    never completes, leaving the DB row stuck indefinitely.  This function
+    detects those stalled jobs and fails them along with any pending songs.
+
+    Controlled by the ``JOB_STALLED_TIMEOUT`` environment variable (default
+    5 minutes).  Silently ignores errors to avoid breaking the health probe.
+    """
+    timeout = int(os.environ.get("JOB_STALLED_TIMEOUT", "5"))
+    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=timeout)
+    try:
+        with get_session() as session:
+            from db.models import Job
+
+            stalled = (
+                session.query(Job)
+                .filter(Job.status.in_(["pending", "running"]), Job.updated_at < cutoff)
+                .all()
+            )
+            for job in stalled:
+                job.status = "failed"
+                job.error = "Job stalled — worker likely crashed"
+                job.message = "Marked as failed due to inactivity"
+                session.query(Song).filter(
+                    Song.job_id == job.id,
+                    Song.status.in_(["pending", "downloading"]),
+                ).update({"status": "failed", "error": "Worker crashed"}, synchronize_session=False)
+            session.commit()
     except Exception:
         pass
