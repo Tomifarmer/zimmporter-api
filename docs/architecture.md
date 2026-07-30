@@ -60,7 +60,8 @@ Client (curl / UI)
 |--------|---------|
 | `app.py` | FastAPI instance, startup SSL config + DB init, `/health` endpoint (always returns HTTP 200 with `"ok"` or `"degraded"` status to report partial outages without breaking callers), CORS middleware |
 | `models.py` | Pydantic request/response models for OpenAPI schema generation |
-| `routes/search.py` | `GET /search` — synchronous ytmusicapi query with Valkey caching (5 min TTL, db 2), supports `limit` parameter |
+| `routes/search.py` | `GET /search` — synchronous ytmusicapi query with Valkey caching (5 min TTL, db 2), supports `limit` parameter; when `API_PROXY_FETCH=true` fetches and embeds thumbnails as base64 data URIs |
+| `routes/thumbnail.py` | `GET /thumbnail?url=` — proxies thumbnail from CDN through the API, cached in db 3 (24 h TTL), excluded from auth middleware |
 | `routes/download.py` | `POST /download/{album\|playlist}` — DB Job row first, then Celery task dispatch |
 | `routes/jobs.py` | `GET /jobs/{id}` and `GET /jobs` — job/song status from MariaDB |
 
@@ -158,7 +159,7 @@ Celery Worker Process
 | `CELERY_BROKER` | `redis://localhost:6379/0` | Broker URL (redis scheme works with Valkey) |
 | `CELERY_BACKEND` | `redis://localhost:6379/1` | Result backend URL |
 
-**Valkey database usage:** db 0 = Celery broker, db 1 = Celery backend, db 2 = search result cache.
+**Valkey database usage:** db 0 = Celery broker, db 1 = Celery backend, db 2 = search result cache, db 3 = thumbnail image cache (24 h TTL).
 
 ### S3 (AWS-Compatible Storage)
 
@@ -180,11 +181,19 @@ Celery Worker Process
 
 When set, all HTTPS clients (requests for thumbnails, boto3/S3, yt-dlp, ytmusicapi) trust the private CA. If the file doesn't exist, a warning is logged and system certs are used as fallback. Set both `CA_CERT` and `REQUESTS_CA_BUNDLE` to the same mounted path.
 
+### Thumbnail Proxy
+
+When `API_PROXY_FETCH=true` is set, the API proxies thumbnail images:
+
+- **Search route**: Thumbnails are fetched concurrently (up to 10 at once), cached in Valkey db 3, and embedded as base64 data URIs in the response
+- **Standalone endpoint**: `GET /thumbnail?url=` returns raw image bytes (excluded from auth)
+- **Config**: `API_PROXY_FETCH` env var controls the feature; `_MAX_THUMB_SIZE` (10 MB) caps image size
+
 ### Authentication (optional)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `USE_SIMPLE_AUTH` | `false` | Enable API key auth (`X-API-Key` header) on all endpoints except `/health` |
+| `USE_SIMPLE_AUTH` | `false` | Enable API key auth (`X-API-Key` header) on all endpoints except `/health` and `/thumbnail` |
 | `API_KEY` | *(none)* | Expected secret value for `X-API-Key` header |
 | `USE_SOCIAL_LOGIN` | `false` | Enable social login Bearer token auth (OIDC/GitHub) on all endpoints except `/health` |
 | `OIDC_ISSUER_URL` | *(none)* | OIDC issuer URL for JWKS key resolution |

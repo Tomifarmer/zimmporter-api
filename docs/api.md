@@ -48,6 +48,12 @@ volumes:
 
 If the configured file does not exist, a warning is logged and the clients fall back to the system CA bundle. Without `CA_CERT` set, all clients use their default system certificates.
 
+### Thumbnail Proxy
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_PROXY_FETCH` | `""` | Set to `"true"` to proxy thumbnail fetches through the API; thumbnails are embedded as base64 data URIs in search results |
+
 ### Authentication (optional)
 
 Two optional authentication methods, controlled by environment variables:
@@ -56,7 +62,7 @@ Two optional authentication methods, controlled by environment variables:
 - **OIDC Bearer token** — Set `USE_SOCIAL_LOGIN=true` and configure `OIDC_ISSUER_URL` + `OIDC_CLIENT_ID`. Clients must send an `Authorization: Bearer <JWT>` header validated against the issuer's JWKS endpoint.
 - **GitHub Bearer token** — Set `USE_SOCIAL_LOGIN=true` and `GITHUB_CLIENT_ID`. Clients must send an `Authorization: Bearer <token>` header validated against the GitHub API.
 
-The `/health` endpoint is always open. If multiple methods are enabled, **any** suffices.
+The `/health` and `/thumbnail` endpoints are always open. If multiple methods are enabled, **any** suffices.
 
 ---
 
@@ -131,7 +137,7 @@ Searches YouTube Music and returns structured result dicts.  Use the returned `b
 | `type` | string | `albums` | — | Result type: `albums`, `featured_playlists`, or `community_playlists` |
 | `limit` | int | `10` | 1–50 | Number of results to return |
 
-**Response:**
+**Response (when `API_PROXY_FETCH` is not enabled):**
 ```json
 {
   "results": [
@@ -148,8 +154,63 @@ Searches YouTube Music and returns structured result dicts.  Use the returned `b
 }
 ```
 
-Each result includes a `thumbnail` field with the URL of the largest available thumbnail image (or `null` if none).
+**Response (when `API_PROXY_FETCH=true`):**
+```json
+{
+  "results": [
+    {
+      "resultType": "album",
+      "browseId": "MPREb_xxxxx",
+      "title": "Album Title",
+      "year": "2023",
+      "type": "Album",
+      "artist": ["Artist Name"],
+      "thumbnail": "data:image/jpeg;base64,/9j/4AAQ..."
+    }
+  ]
+}
 ```
+
+When `API_PROXY_FETCH=true`, the `thumbnail` field is a **base64 data URI** instead of a CDN URL. The API fetches thumbnails concurrently through its outbound proxy, caches them in Valkey db 3 for 24 hours, and embeds them directly in the response. The frontend can render these `<img src="data:...">` without any additional network requests.
+```
+
+---
+
+### Thumbnail Proxy
+
+```
+GET /thumbnail?url=<url-encoded-cdn-url>
+```
+
+Fetches a thumbnail image from the upstream CDN through the API's outbound connection. Results are cached in Valkey db 3 for 24 hours. The endpoint is excluded from auth middleware so `<img>` tags can load thumbnails without authentication headers.
+
+**Query Parameters:**
+
+| Param | Type | Default | Constraints | Description |
+|-------|------|---------|-------------|-------------|
+| `url` | string | *(required)* | — | Full URL of the CDN thumbnail image (must be URL-encoded) |
+
+**Response:** The raw image bytes with the original `Content-Type` header.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Image returned (body is the raw bytes) |
+| `400` | `url` parameter missing |
+| `502` | Upstream CDN request failed |
+
+**Response headers:**
+
+| Header | Value | Description |
+|--------|-------|-------------|
+| `Content-Type` | `image/jpeg`, `image/webp`, etc. | Original content type from the CDN |
+| `Cache-Control` | `public, max-age=86400` | Instructs browsers/CDNs to cache for 24 hours |
+| `X-Cache` | `HIT` or `MISS` | Whether the response was served from Valkey cache |
+
+**Configuration:**
+
+| Env Var | Description |
+|---------|-------------|
+| `API_PROXY_FETCH` | Set to `true` to enable thumbnail proxy features (the `/thumbnail` endpoint works regardless) |
 
 ---
 
