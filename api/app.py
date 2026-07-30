@@ -34,6 +34,7 @@ from starlette.responses import JSONResponse
 from api.routes.download import download_router
 from api.routes.jobs import jobs_router
 from api.routes.search import search_router
+from api.routes.thumbnail import thumbnail_router
 from db.engine import get_session, init_db
 from db.models import Song
 from tasks.celery_app import celery_app
@@ -52,6 +53,7 @@ app = FastAPI(title="Zimmporter API", version=__version__, lifespan=lifespan)
 app.include_router(search_router)
 app.include_router(download_router)
 app.include_router(jobs_router)
+app.include_router(thumbnail_router)
 
 
 # ── JWKS cache ──────────────────────────────────────────────────────────────
@@ -109,7 +111,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next) -> JSONResponse:
-        if request.method == "OPTIONS" or request.url.path == "/health":
+        if request.method == "OPTIONS" or request.url.path in ("/health", "/thumbnail"):
             return await call_next(request)
 
         api_key_enabled = os.environ.get("USE_SIMPLE_AUTH", "").lower() == "true"

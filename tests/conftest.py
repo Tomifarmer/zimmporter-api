@@ -54,6 +54,7 @@ _redis_instance = MagicMock()
 _redis_instance.ping.return_value = True
 _redis_instance.get.return_value = None
 _redis_instance.set.return_value = True
+_redis_instance.hgetall.return_value = {}
 _patches.append(patch("redis.Redis", return_value=_redis_instance))
 _patches.append(patch("redis.Redis.from_url", return_value=_redis_instance))
 _patches.append(patch("redis.from_url", return_value=_redis_instance))
@@ -111,6 +112,16 @@ def _reset_ytdl_opts():
 def _reset_mocks():
     _boto3_client.reset_mock()
     _boto3_session.reset_mock()
+    import api.routes.search as search_module
+    import api.routes.thumbnail as thumbnail_module
+
+    if thumbnail_module._REDIS is not None:
+        thumbnail_module._REDIS.close()
+    thumbnail_module._REDIS = None
+
+    if search_module._REDIS_THUMB is not None:
+        search_module._REDIS_THUMB.close()
+    search_module._REDIS_THUMB = None
 
 
 @pytest.fixture(autouse=True)
