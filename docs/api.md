@@ -68,7 +68,7 @@ The `/health` endpoint is always open. If multiple methods are enabled, **any** 
 GET /health
 ```
 
-Validates all backend components: Valkey (broker), Celery workers, and MariaDB.  Automatically purges jobs older than 30 days on every healthy check. Always returns HTTP 200 with `"status": "ok"` or `"degraded"`. The endpoint never returns HTTP 503 for component-level failures — it always reports the degraded state so callers can inspect which components are down without treating a partial outage as an error response.
+Validates all backend components: Valkey (broker), Celery workers, and MariaDB.  Automatically purges jobs older than `JOB_RETENTION_DAYS` (default `0` — never purge) on every healthy check. Always returns HTTP 200 with `"status": "ok"` or `"degraded"`. The endpoint never returns HTTP 503 for component-level failures — it always reports the degraded state so callers can inspect which components are down without treating a partial outage as an error response.
 
 **All healthy (HTTP 200):**
 ```json

@@ -194,7 +194,7 @@ Both auth methods can be enabled independently; providing valid credentials for 
 
 ## Retention Policy
 
-Jobs and songs older than 30 days are automatically deleted on every successful `/health` check.  This prevents the database from accumulating stale data.  The cleanup runs via `DELETE ... WHERE created_at < cutoff` with `synchronize_session=False` for performance.
+Jobs and songs are automatically deleted after the number of days set via the `JOB_RETENTION_DAYS` environment variable (default `0` — never purge).  The cleanup runs on every successful `/health` check to prevent the database from accumulating stale data.  The cleanup runs via `DELETE ... WHERE created_at < cutoff` with `synchronize_session=False` for performance.
 
 ## S3 Object Path Convention
 
@@ -223,7 +223,7 @@ zimmporter-master/
 │   └── ytdlp_logger.py      # Custom logger with album/song context
 ├── api/                     # FastAPI application
 │   ├── __init__.py
-│   ├── app.py               # FastAPI app, /health, 30-day cleanup
+│   ├── app.py               # FastAPI app, /health, configurable job retention cleanup
 │   ├── models.py            # Pydantic models
 │   └── routes/
 │       ├── __init__.py

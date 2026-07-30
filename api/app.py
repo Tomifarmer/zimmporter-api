@@ -3,7 +3,7 @@
 Creates the :class:`FastAPI` instance, mounts route modules, initializes
 the database on startup, and exposes a ``/health`` endpoint that validates
 all backend components (Valkey, Celery worker, MariaDB) and triggers
-30-day job retention cleanup.
+configurable job retention cleanup (``JOB_RETENTION_DAYS``, default 0).
 """
 
 import datetime
@@ -308,16 +308,20 @@ def health() -> dict:
 
 
 def _clean_old_jobs() -> None:
-    """Delete jobs and songs older than 30 days.
+    """Delete jobs and songs older than the configured retention period.
 
-    Called automatically on every successful ``/health`` check.  Silently
-    ignores errors to avoid breaking the health probe.
+    Controlled by the ``JOB_RETENTION_DAYS`` environment variable (default 0 —
+    never purge).  Called automatically on every successful ``/health`` check.
+    Silently ignores errors to avoid breaking the health probe.
     """
+    retention_days = int(os.environ.get("JOB_RETENTION_DAYS", "0"))
+    if retention_days <= 0:
+        return
     try:
         with get_session() as session:
             from db.models import Job
 
-            cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=30)
+            cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=retention_days)
             session.query(Job).filter(Job.created_at < cutoff).delete(synchronize_session=False)
             session.query(Song).filter(Song.created_at < cutoff).delete(synchronize_session=False)
     except Exception:
