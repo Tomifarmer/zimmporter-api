@@ -14,7 +14,7 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 COPY --from=deno /bin/deno /usr/libexec/deno
 COPY --from=deno /usr/local/lib/glibc/ /usr/local/lib/glibc/
 COPY --from=deno /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
-RUN apk upgrade --no-cache && \
+RUN apk upgrade --no-cache && apk add --upgrade --no-cache expat && \
     rm /usr/local/bin/uv && \
     apk add --no-cache ffmpeg && \
     addgroup -S zimmporter -g 51000 && \
