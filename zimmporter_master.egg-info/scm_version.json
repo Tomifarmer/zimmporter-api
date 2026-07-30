@@ -1,8 +1,8 @@
 {
-  "tag": "1.0.0",
+  "tag": "1.0.2",
   "distance": 0,
-  "node": "ge1b86e87f7e98c7efc08bea16b710196e764773d",
+  "node": "g3f968f50ab319e7ff2f9a27e99c109d49fb99ad3",
   "dirty": true,
-  "branch": "feature/oidc",
-  "node_date": "2026-07-25"
+  "branch": "main",
+  "node_date": "2026-07-29"
 }

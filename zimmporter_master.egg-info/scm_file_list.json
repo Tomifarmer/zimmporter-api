@@ -24,6 +24,7 @@
     "tests/test_postprocessors.py",
     "tests/test_routes_download.py",
     "tests/test_routes_search.py",
+    "tests/test_auth.py",
     "tests/test_health.py",
     "tests/test_cert.py",
     "tests/mock_data.py",

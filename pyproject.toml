@@ -68,6 +68,11 @@ include = ["zimmporter*", "api*", "db*", "tasks*"]
 
 [tool.setuptools_scm]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.21",

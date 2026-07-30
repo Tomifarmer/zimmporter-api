@@ -14,7 +14,7 @@ Then open the Swagger UI at http://localhost:8000/docs or try the API directly.
 
 ### Endpoints
 
-- **`GET /search?q=<query>&type=<albums|playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes.
+- **`GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes.
 - **`POST /download/album`** — Queue one or more albums (`id: "MPREb_xxx,MPREb_yyy"`) with concurrency (`concurrent`: 1–32). Returns `job_id`.
 - **`POST /download/playlist`** — Queue one or more playlists. Same flow as album download.
 - **`GET /jobs/<id>`** — Poll a specific job for per-song progress.

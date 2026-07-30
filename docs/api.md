@@ -118,7 +118,7 @@ Validates all backend components: Valkey (broker), Celery workers, and MariaDB. 
 ### Search
 
 ```
-GET /search?q=<query>&type=<albums|playlists>&limit=10
+GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10
 ```
 
 Searches YouTube Music and returns structured result dicts.  Use the returned `browseId` to trigger a download.  Results are cached in Valkey for 5 minutes; subsequent requests for the same query are served from cache.
@@ -128,7 +128,7 @@ Searches YouTube Music and returns structured result dicts.  Use the returned `b
 | Param | Type | Default | Constraints | Description |
 |-------|------|---------|-------------|-------------|
 | `q` | string | *(required)* | — | Free-text search query |
-| `type` | string | `albums` | — | Result type: `albums` or `playlists` |
+| `type` | string | `albums` | — | Result type: `albums`, `featured_playlists`, or `community_playlists` |
 | `limit` | int | `10` | 1–50 | Number of results to return |
 
 **Response:**
