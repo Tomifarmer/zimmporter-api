@@ -50,6 +50,7 @@ Client (curl / UI)
 |--------|---------|
 | `cert.py` | Private CA certificate configuration: `get_ca_cert()` returns cert path from env vars, `configure_ssl()` sets up requests library at startup |
 | `core.py` | `Zimmporter` class: search via ytmusicapi, download via yt-dlp + `billiard.Pool`, AAC conversion, per-song download methods returning status dicts |
+| `cookie_health.py` | Cookie staleness helpers: `mark_stale()`, `is_stale()`, `clear_stale()` backed by a Valkey flag (db 3) |
 | `postprocessors.py` | yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover embed), `UploadToS3` (S3 upload + file cleanup) |
 | `ytdlp_logger.py` | Custom logger with per-song `[album/song]` context injected into every log line |
 
@@ -58,10 +59,12 @@ Client (curl / UI)
 
 | Module | Purpose |
 |--------|---------|
-| `app.py` | FastAPI instance, startup SSL config + DB init, `/health` endpoint (always returns HTTP 200 with `"ok"` or `"degraded"` status to report partial outages without breaking callers), CORS middleware |
+| `app.py` | FastAPI instance, startup SSL config + DB init, `/health` endpoint (always returns HTTP 200 with `"ok"` or `"degraded"` status to report partial outages without breaking callers), stalled-job cleanup (`JOB_STALLED_TIMEOUT`), CORS middleware |
+| `scheduler.py` | Periodic S3 library index dispatcher (`INDEX_INTERVAL_MINUTES`, default 30) — runs inside the API pod, guarded by a Valkey lock (db 4), no Celery beat container |
 | `models.py` | Pydantic request/response models for OpenAPI schema generation |
-| `routes/search.py` | `GET /search` — synchronous ytmusicapi query with Valkey caching (5 min TTL, db 2), supports `limit` parameter; when `API_PROXY_FETCH=true` fetches and embeds thumbnails as base64 data URIs |
+| `routes/search.py` | `GET /search` — synchronous ytmusicapi query with Valkey caching (5 min TTL, db 2), supports `limit` and `type` (albums/featured_playlists/community_playlists); enriches results with an `available` flag from the `available_albums` index; when `API_PROXY_FETCH=true` fetches and embeds thumbnails as base64 data URIs |
 | `routes/thumbnail.py` | `GET /thumbnail?url=` — proxies thumbnail from CDN through the API, cached in db 3 (24 h TTL), excluded from auth middleware |
+| `routes/cookies.py` | `GET /cookies` (metadata) and `POST /cookies` (multipart upload) manage the yt-dlp cookies file; validated, written atomically into `COOKIE_DIR`; contents never exposed |
 | `routes/download.py` | `POST /download/{album\|playlist}` — DB Job row first, then Celery task dispatch |
 | `routes/jobs.py` | `GET /jobs/{id}` and `GET /jobs` — job/song status from MariaDB |
 
@@ -70,14 +73,15 @@ Client (curl / UI)
 | Module | Purpose |
 |--------|---------|
 | `engine.py` | SQLAlchemy sync engine, `get_session()` context manager (commit/rollback), env var configuration |
-| `models.py` | ORM models: `Job` (download batches), `Song` (per-song status, FK to Job) |
+| `models.py` | ORM models: `Job` (download batches), `Song` (per-song status, FK to Job), `AvailableAlbum` (S3 library index, keyed by `browse_id`) |
 
 ### `tasks/` - Celery Workers
 
 | Module | Purpose |
 |--------|---------|
-| `celery_app.py` | Celery instance, Valkey broker/backend, JSON serialization, late ACKs; calls `configure_ssl()` at module load for worker processes |
-| `download.py` | `download_album` / `download_playlist` tasks: billiard.Pool concurrency, per-song DB updates |
+| `celery_app.py` | Celery instance, Valkey broker/backend, JSON serialization, late ACKs; calls `configure_ssl()` at module load for worker processes; pre-warms yt-dlp plugins serially on worker process init (avoids first-import race) |
+| `download.py` | `download_album` / `download_playlist` tasks: billiard.Pool concurrency, per-song DB updates; upserts downloaded items into `available_albums` |
+| `index.py` | `index_albums` task: scans the S3 bucket (`{artist}/{album}/` prefixes) and reconciles the `available_albums` table (upsert + prune) |
 
 ## Concurrency Model
 
@@ -140,6 +144,20 @@ Celery Worker Process
 
 **Cascade behavior**: Deleting a `Job` automatically deletes all related `Song` rows.
 
+### `available_albums` Table
+
+Mirrors the current S3 library contents and drives the `available` flag on search results.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `browse_id` | `VARCHAR(512)` | YT Music browse ID of the album/playlist |
+| `title` | `VARCHAR(512)` | Title |
+| `artist` | `VARCHAR(512)` | Artist name |
+| `album` | `VARCHAR(512)` | Album/playlist title |
+| `updated_at` | `DATETIME(3)` | UTC last update |
+
+Populated by download tasks (exact `browse_id`) and reconciled by the periodic `index_albums` S3 scan (upsert + prune of entries no longer in S3).
+
 ## Environment Variables
 
 ### Database (MariaDB)
@@ -159,7 +177,7 @@ Celery Worker Process
 | `CELERY_BROKER` | `redis://localhost:6379/0` | Broker URL (redis scheme works with Valkey) |
 | `CELERY_BACKEND` | `redis://localhost:6379/1` | Result backend URL |
 
-**Valkey database usage:** db 0 = Celery broker, db 1 = Celery backend, db 2 = search result cache, db 3 = thumbnail image cache (24 h TTL).
+**Valkey database usage:** db 0 = Celery broker, db 1 = Celery backend, db 2 = search result cache (5 min TTL) + available-albums index reads, db 3 = thumbnail image cache (24 h TTL) + cookie staleness flag, db 4 = S3 library index dispatch lock.
 
 ### S3 (AWS-Compatible Storage)
 
@@ -181,6 +199,26 @@ Celery Worker Process
 
 When set, all HTTPS clients (requests for thumbnails, boto3/S3, yt-dlp, ytmusicapi) trust the private CA. If the file doesn't exist, a warning is logged and system certs are used as fallback. Set both `CA_CERT` and `REQUESTS_CA_BUNDLE` to the same mounted path.
 
+### S3 Library Index
+
+The `available_albums` table is kept in sync with the S3 bucket:
+
+- **Recording** — download tasks (`tasks/download.py`) upsert every successfully downloaded album/playlist with its exact YT Music `browse_id`.
+- **Periodic scan** — `api/scheduler.py` runs inside the API pod and dispatches `tasks.index_albums` every `INDEX_INTERVAL_MINUTES` (default 30, min 1). The task scans the S3 bucket (`{artist}/{album}/` prefixes), upserts found items, and prunes entries no longer present. A Valkey lock (db 4) deduplicates dispatch across multiple API replicas — no Celery beat container is needed.
+- **Search enrichment** — `GET /search` matches each result against the index by `browse_id` (or normalized artist+title) after the cache read, so results stay fresh.
+
+### Cookies (YouTube auth)
+
+Age-restricted downloads can be authenticated with a shared yt-dlp cookies file:
+
+- **Upload** — `POST /cookies` accepts a Netscape-format `cookies.txt` (multipart, field `file`), validates it (parses + ≥1 `youtube.com` cookie, ≤2 MB), and writes it atomically into `COOKIE_DIR`. `GET /cookies` exposes metadata only (`exists`, `size`, `cookie_count`, `domains`, `modified_at`, `is_stale`).
+- **Stale detection** — when yt-dlp reports bot checks, invalid cookies, or cookie rotation during a download, the worker flags the cookies via `zimmporter/cookie_health.py` (Valkey db 3). Downloads then run anonymously until a fresh upload clears the flag.
+- **Workers** — each job re-applies the cookie config from `YTDLP_COOKIEFILE` without a restart (`tasks/download.py::_refresh_cookie_config`).
+
+### POT Provider (BgUtils)
+
+When `POT_PROVIDER_URL` is set (e.g. `http://bgutil-provider:4416`), yt-dlp requests PO (Proof of Origin) tokens from a [BgUtils yt-dlp POT provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) server to bypass YouTube bot checks (`YTDL_OPTS["extractor_args"]["youtubepot-bgutilhttp"]`). A `bgutil-provider` service is included in docker-compose and the Helm chart.
+
 ### Thumbnail Proxy
 
 When `API_PROXY_FETCH=true` is set, the API proxies thumbnail images:
@@ -200,6 +238,16 @@ When `API_PROXY_FETCH=true` is set, the API proxies thumbnail images:
 | `OIDC_CLIENT_ID` | *(none)* | Expected `aud` claim in the Bearer token |
 
 Both auth methods can be enabled independently; providing valid credentials for either method suffices.
+
+### Index / Cookies / POT / Stalled Jobs
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the periodic S3 library index scan (min `1`) |
+| `COOKIE_DIR` | `/var/zimmporter/cookies` | Directory holding the shared yt-dlp cookies file (written by `POST /cookies`) |
+| `YTDLP_COOKIEFILE` | *(none)* | Worker-side path to the cookies file used by yt-dlp |
+| `POT_PROVIDER_URL` | *(none)* | HTTP URL of a BgUtils yt-dlp POT provider (unset disables PO-token extraction) |
+| `JOB_STALLED_TIMEOUT` | `5` | Minutes after which a stuck `pending`/`running` job is auto-failed during `/health` |
 
 ## Retention Policy
 
@@ -228,42 +276,51 @@ zimmporter-master/
 
 │   ├── cert.py              # Private CA certificate configuration
 │   ├── core.py              # Zimmporter class, download logic
+│   ├── cookie_health.py     # Cookie staleness flag helpers
 │   ├── postprocessors.py    # yt-dlp postprocessors (metadata + S3)
 │   └── ytdlp_logger.py      # Custom logger with album/song context
 ├── api/                     # FastAPI application
 │   ├── __init__.py
 │   ├── app.py               # FastAPI app, /health, job retention + stalled-job cleanup
+│   ├── scheduler.py         # Periodic S3 library index dispatcher
 │   ├── models.py            # Pydantic models
 │   └── routes/
 │       ├── __init__.py
-│       ├── search.py        # GET /search
+│       ├── search.py        # GET /search (+ available flag, base64 thumbnails)
 │       ├── download.py      # POST /download/{album|playlist}
-│       └── jobs.py          # GET /jobs/{id}, GET /jobs
+│       ├── jobs.py          # GET /jobs/{id}, GET /jobs
+│       ├── cookies.py       # GET/POST /cookies (yt-dlp cookie management)
+│       └── thumbnail.py     # GET /thumbnail (proxy)
 ├── db/                      # Database layer
 │   ├── __init__.py
 │   ├── engine.py            # SQLAlchemy engine, session manager
-│   └── models.py            # Job/Song ORM models
+│   └── models.py            # Job/Song/AvailableAlbum ORM models
 ├── tasks/                   # Celery workers
 │   ├── __init__.py
 │   ├── celery_app.py        # Celery configuration
-│   └── download.py          # download_album / download_playlist tasks
+│   ├── download.py          # download_album / download_playlist tasks
+│   └── index.py             # index_albums S3 library scan task
 ├── .github/                 # GitHub Actions
 │   └── workflows/
 │       └── build.yml        # Test + build + push to GHCR
 ├── docs/                    # Documentation
 │   ├── api.md
 │   └── architecture.md
-├── tests/                   # pytest test suite (88 tests)
+├── tests/                   # pytest test suite (150 test functions)
 │   ├── conftest.py          # Fixtures: SQLite DB, test client, module-level mocks
 │   ├── mock_data.py         # Mock ytmusicapi response data
 │   ├── test_cert.py         # CA cert configuration
 │   ├── test_core.py         # Core search + download logic
 │   ├── test_health.py       # GET /health
+│   ├── test_index.py        # S3 library index task
+│   ├── test_auth.py         # Auth middleware
 │   ├── test_postprocessors.py  # EnrichMeta, UploadToS3
+│   ├── test_routes_cookies.py  # GET/POST /cookies
 │   ├── test_routes_download.py # POST /download
 │   ├── test_routes_jobs.py  # GET /jobs, /retry
-│   └── test_routes_search.py # GET /search
-├── docker-compose.yml       # Local dev: api, worker, valkey, mariadb
+│   ├── test_routes_search.py  # GET /search
+│   └── test_routes_thumbnail.py # GET /thumbnail
+├── docker-compose.yml       # Local dev: api, worker, valkey, mariadb, bgutil-provider
 ├── Dockerfile               # Multi-stage build
 ├── requirements.txt         # Python dependencies
 ├── AGENTS.md                # Session notes for AI assistants

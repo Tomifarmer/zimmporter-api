@@ -29,6 +29,12 @@ curl -s "http://localhost:8000/jobs?limit=20&offset=0" | jq .
 
 # Health check (always returns 200; status is "ok" or "degraded")
 curl -s "http://localhost:8000/health" | jq .
+
+# Inspect the configured yt-dlp cookies file (metadata only)
+curl -s "http://localhost:8000/cookies" | jq .
+
+# Upload a Netscape-format cookies file (enables age-restricted downloads)
+curl -X POST "http://localhost:8000/cookies" -F "file=@cookies.txt" | jq .
 ```
 
 ## Configuration
@@ -54,6 +60,31 @@ If the configured file does not exist, a warning is logged and the clients fall 
 |----------|---------|-------------|
 | `API_PROXY_FETCH` | `""` | Set to `"true"` to proxy thumbnail fetches through the API; thumbnails are embedded as base64 data URIs in search results |
 
+### S3 Library Index
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the periodic S3 library index scan (min `1`) |
+
+### Cookies (YouTube auth)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COOKIE_DIR` | `/var/zimmporter/cookies` | Directory holding the shared yt-dlp cookies file (written by `POST /cookies`) |
+| `YTDLP_COOKIEFILE` | — | Worker-side path to the cookies file used by yt-dlp for age-restricted downloads |
+
+### POT Provider (BgUtils)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POT_PROVIDER_URL` | — | HTTP URL of a BgUtils yt-dlp POT provider (e.g. `http://bgutil-provider:4416`); unset disables PO-token extraction |
+
+### Stalled Jobs
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JOB_STALLED_TIMEOUT` | `5` | Minutes after which a stuck `pending`/`running` job is auto-failed (recovers jobs orphaned by a worker crash, e.g. OOM/SIGKILL) |
+
 ### Authentication (optional)
 
 Two optional authentication methods, controlled by environment variables:
@@ -74,7 +105,7 @@ The `/health` and `/thumbnail` endpoints are always open. If multiple methods ar
 GET /health
 ```
 
-Validates all backend components: Valkey (broker), Celery workers, and MariaDB.  Automatically purges jobs older than `JOB_RETENTION_DAYS` (default `0` — never purge) on every healthy check. Always returns HTTP 200 with `"status": "ok"` or `"degraded"`. The endpoint never returns HTTP 503 for component-level failures — it always reports the degraded state so callers can inspect which components are down without treating a partial outage as an error response.
+Validates all backend components: Valkey (broker), Celery workers, and MariaDB.  Automatically purges jobs older than `JOB_RETENTION_DAYS` (default `0` — never purge) on every healthy check. Also fails jobs stuck in `pending`/`running` longer than `JOB_STALLED_TIMEOUT` minutes (default `5`) — this recovers jobs orphaned when a worker crashed (e.g. OOM / SIGKILL), since their exception handler never ran. Always returns HTTP 200 with `"status": "ok"` or `"degraded"`. The endpoint never returns HTTP 503 for component-level failures — it always reports the degraded state so callers can inspect which components are down without treating a partial outage as an error response.
 
 **All healthy (HTTP 200):**
 ```json
@@ -148,7 +179,8 @@ Searches YouTube Music and returns structured result dicts.  Use the returned `b
       "year": "2023",
       "type": "Album",
       "artist": ["Artist Name"],
-      "thumbnail": "https://lh3.googleusercontent.com/..."
+      "thumbnail": "https://lh3.googleusercontent.com/...",
+      "available": false
     }
   ]
 }
@@ -165,11 +197,14 @@ Searches YouTube Music and returns structured result dicts.  Use the returned `b
       "year": "2023",
       "type": "Album",
       "artist": ["Artist Name"],
-      "thumbnail": "data:image/jpeg;base64,/9j/4AAQ..."
+      "thumbnail": "data:image/jpeg;base64,/9j/4AAQ...",
+      "available": true
     }
   ]
 }
 ```
+
+Each result includes an `available` boolean flagging albums/playlists already present in the S3 library (matched by exact `browseId` or normalized artist+title, sourced from the `available_albums` table).
 
 When `API_PROXY_FETCH=true`, the `thumbnail` field is a **base64 data URI** instead of a CDN URL. The API fetches thumbnails concurrently through its outbound proxy, caches them in Valkey db 3 for 24 hours, and embeds them directly in the response. The frontend can render these `<img src="data:...">` without any additional network requests.
 ```
@@ -211,6 +246,54 @@ Fetches a thumbnail image from the upstream CDN through the API's outbound conne
 | Env Var | Description |
 |---------|-------------|
 | `API_PROXY_FETCH` | Set to `true` to enable thumbnail proxy features (the `/thumbnail` endpoint works regardless) |
+
+---
+
+### Cookies
+
+#### Get Cookie Status
+
+```
+GET /cookies
+```
+
+Returns metadata about the configured yt-dlp cookies file — never its contents.
+
+**Response:**
+```json
+{
+  "exists": true,
+  "size": 4096,
+  "cookie_count": 12,
+  "domains": [".youtube.com", ".google.com"],
+  "modified_at": "2026-08-01T10:00:00+00:00",
+  "is_stale": false
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `exists` | bool | Whether a cookies file is present |
+| `size` | int | File size in bytes |
+| `cookie_count` | int | Number of parsed cookies |
+| `domains` | array | Cookie domains (e.g. `.youtube.com`) |
+| `modified_at` | string \| null | Last file modification timestamp |
+| `is_stale` | bool | `true` when the backend detected the cookies are no longer valid |
+
+#### Upload Cookies
+
+```
+POST /cookies
+```
+
+Multipart upload (field `file`) of a Netscape-format `cookies.txt`. Validates that the file parses and contains at least one `youtube.com` cookie, and is at most 2 MB. The file is written atomically into `COOKIE_DIR`, so workers pick it up without restart.
+
+While stale, downloads run anonymously (bad cookies are skipped) and `GET /cookies` reports `is_stale: true`. Uploading a fresh file clears the flag.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Cookies stored and applied |
+| `400` | Missing/invalid file, no YouTube cookie, or larger than 2 MB |
 
 ---
 
