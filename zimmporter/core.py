@@ -26,6 +26,11 @@ from zimmporter.ytdlp_logger import YTDLPLogger
 #: Temporary working directory for intermediate downloads and thumbnails.
 temp_dir = "/data/zimmer/importer/"
 
+#: URL of the BgUtils POT provider HTTP server (e.g. ``http://bgutil-provider:4416``).
+#: When set, yt-dlp is configured to request PO tokens from it via the
+#: ``youtubepot-bgutilhttp`` provider. Empty disables the integration.
+POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "").strip()
+
 #: Global yt-dlp options dict.
 #:
 #: Mutated per-call (``outtmpl``), shared across the main process and
@@ -48,6 +53,9 @@ YTDL_OPTS = {
         {"key": "EmbedThumbnail", "already_have_thumbnail": False},
     ],
 }
+
+if POT_PROVIDER_URL:
+    YTDL_OPTS["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]}}
 
 
 # How many times to retry a song if download or conversion fails due to race conditions.
