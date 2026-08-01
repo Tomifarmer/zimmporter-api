@@ -7,6 +7,7 @@ configurable job retention cleanup (``JOB_RETENTION_DAYS``, default 0)
 and stalled-job detection (``JOB_STALLED_TIMEOUT``, default 5 minutes).
 """
 
+import asyncio
 import datetime
 import logging
 import os
@@ -29,6 +30,7 @@ from api.routes.download import download_router
 from api.routes.jobs import jobs_router
 from api.routes.search import search_router
 from api.routes.thumbnail import thumbnail_router
+from api.scheduler import run_index_scheduler
 from db.engine import get_session, init_db
 from db.models import Song
 from tasks.celery_app import celery_app
@@ -47,7 +49,9 @@ if not logger.handlers:
 async def lifespan(_app: FastAPI):
     configure_ssl()
     init_db()
+    scheduler = asyncio.create_task(run_index_scheduler())
     yield
+    scheduler.cancel()
 
 
 app = FastAPI(title="Zimmporter API", version=__version__, lifespan=lifespan)

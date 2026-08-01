@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy import (
     Date as SaDate,
@@ -122,3 +123,38 @@ class Song(Base):
     created_at = Column(DateTime(3), default=lambda: datetime.datetime.now(datetime.UTC))
 
     job = relationship("Job", back_populates="songs")
+
+
+class AvailableAlbum(Base):
+    """Index of albums/playlists available in the S3 backend library.
+
+    Populated regularly by the ``tasks.index_albums`` Celery beat task which
+    scans the S3 bucket, and incrementally by download tasks (which attach the
+    exact ``browse_id`` for reliable search-result matching).
+
+    Attributes:
+        id: Auto-incrementing primary key.
+        artist: Artist name (``"playlists"`` for playlist entries).
+        album: Album or playlist title.
+        browse_id: YT Music browse ID recorded from a successful download
+            job (``None`` when only discovered via the S3 scan).
+        track_count: Number of tracks detected in S3 (``None`` when unknown).
+        last_seen: UTC timestamp of the most recent index run that observed
+            this entry; used to prune albums removed from S3.
+        created_at: UTC timestamp of row creation.
+    """
+
+    __tablename__ = "available_albums"
+    __table_args__ = (UniqueConstraint("artist", "album", name="uq_available_artist_album"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    artist = Column(String(512), nullable=False)
+    album = Column(String(512), nullable=False)
+    browse_id = Column(String(512), nullable=True, index=True)
+    track_count = Column(Integer, nullable=True)
+    last_seen = Column(
+        DateTime(3),
+        default=lambda: datetime.datetime.now(datetime.UTC),
+        nullable=False,
+    )
+    created_at = Column(DateTime(3), default=lambda: datetime.datetime.now(datetime.UTC))

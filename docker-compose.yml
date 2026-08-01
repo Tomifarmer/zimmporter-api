@@ -48,6 +48,7 @@ services:
       - DB_PASS=root
       - DB_NAME=zimmporter
       - COOKIE_DIR=/var/zimmporter/cookies
+      - INDEX_INTERVAL_MINUTES=${INDEX_INTERVAL_MINUTES:-30}
     env_file:
       - .env.local
     volumes:

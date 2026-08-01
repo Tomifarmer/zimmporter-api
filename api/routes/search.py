@@ -18,6 +18,8 @@ from starlette.requests import Request
 
 from api.models import SearchResponse
 from api.routes.thumbnail import _cache_key
+from db.engine import get_session
+from db.models import AvailableAlbum
 from tasks.celery_app import celery_app
 from zimmporter.core import Zimmporter
 
@@ -35,6 +37,55 @@ _REDIS_THUMB: Redis | None = None
 
 def _get_redis() -> Redis:
     return Redis.from_url(celery_app.conf.broker_url, db=2)
+
+
+def _norm(value: str) -> str:
+    """Normalize a name for fuzzy matching (lowercase, collapsed whitespace)."""
+    return re.sub(r"\s+", " ", value or "").strip().lower()
+
+
+def _load_available_index() -> tuple[set[str], set[tuple[str, str]]]:
+    """Load the S3 library index for search-result matching.
+
+    Returns:
+        ``(browse_ids, names)`` where ``browse_ids`` contains exact YT Music
+        browse IDs and ``names`` contains ``(normalized artist, normalized
+        album)`` tuples from the ``available_albums`` table.  Failures are
+        swallowed so search still works when the DB is unavailable.
+    """
+    browse_ids: set[str] = set()
+    names: set[tuple[str, str]] = set()
+    try:
+        with get_session() as session:
+            for row in session.query(AvailableAlbum).all():
+                if row.browse_id:
+                    browse_ids.add(row.browse_id)
+                names.add((_norm(row.artist), _norm(row.album)))
+    except Exception:
+        pass
+    return browse_ids, names
+
+
+def _mark_available(results: list[dict]) -> None:
+    """Add an ``available`` boolean to each search result in place.
+
+    An album/playlist is flagged as available when its ``browseId`` matches
+    the index exactly, or when a normalized artist + title matches a library
+    entry.  Playlists are matched by title only (artist is ``"playlists"``).
+    """
+    browse_ids, names = _load_available_index()
+    for result in results:
+        available = bool(result.get("browseId") in browse_ids)
+        if not available:
+            title = _norm(result.get("title", ""))
+            if result.get("resultType") in ("album", "song", "video"):
+                for artist in result.get("artist", []) or []:
+                    if (_norm(artist), title) in names:
+                        available = True
+                        break
+            else:
+                available = (_norm("playlists"), title) in names
+        result["available"] = available
 
 
 def _get_redis_thumb() -> Redis | None:
@@ -167,5 +218,7 @@ def search(
                     data, content_type = result
                     b64 = base64.b64encode(data).decode("ascii")
                     results[fut_to_idx[fut]]["thumbnail"] = f"data:{content_type};base64,{b64}"
+
+    _mark_available(results)
 
     return SearchResponse(results=results)

@@ -34,6 +34,7 @@ from sqlalchemy import update as sa_update
 from db.engine import get_session
 from db.models import Job, Song
 from tasks.celery_app import celery_app
+from tasks.index import upsert_available_album
 from zimmporter.cert import get_ca_cert
 from zimmporter.core import YTDL_OPTS, YTDLP_COOKIEFILE, Zimmporter, apply_cookie_config, temp_dir
 from zimmporter.ytdlp_logger import YTDLPLogger
@@ -245,6 +246,18 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
 
             shutil.rmtree(f"{temp_dir}{artist}/{album_name}", ignore_errors=True)
 
+            with get_session() as session:
+                success_count = (
+                    session.query(Song)
+                    .filter(
+                        Song.job_id == self.request.id,
+                        Song.album == album_name,
+                        Song.status == "success",
+                    )
+                    .count()
+                )
+            upsert_available_album(artist, album_name, browse_id=id, track_count=success_count)
+
         with get_session() as session:
             _update_job(
                 session,
@@ -434,6 +447,18 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                     session.commit()
 
             shutil.rmtree(f"{temp_dir}playlists/{album_name}", ignore_errors=True)
+
+            with get_session() as session:
+                success_count = (
+                    session.query(Song)
+                    .filter(
+                        Song.job_id == self.request.id,
+                        Song.album == album_name,
+                        Song.status == "success",
+                    )
+                    .count()
+                )
+            upsert_available_album("playlists", album_name, browse_id=id, track_count=success_count)
 
         with get_session() as session:
             _update_job(

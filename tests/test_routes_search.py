@@ -153,3 +153,108 @@ class TestSearchRoute:
         assert resp.status_code == 200
         data = resp.json()
         assert data["results"][0]["thumbnail"] == original_url
+
+
+class TestSearchAvailability:
+    def _add_available(self, artist, album, browse_id=None):
+        from db.engine import get_session
+        from db.models import AvailableAlbum
+
+        with get_session() as session:
+            session.add(AvailableAlbum(artist=artist, album=album, browse_id=browse_id))
+            session.commit()
+
+    def test_all_results_get_available_flag(self, test_client, mocker):
+        from zimmporter.core import Zimmporter
+
+        mock_results = [
+            {
+                "resultType": "album",
+                "browseId": "MPREb_abc",
+                "title": "Album One",
+                "artist": ["Artist"],
+                "thumbnail": "https://x.jpg",
+            },
+            {
+                "resultType": "album",
+                "browseId": "MPREb_def",
+                "title": "Album Two",
+                "artist": ["Artist"],
+                "thumbnail": "https://x.jpg",
+            },
+        ]
+        mocker.patch.object(Zimmporter, "search", return_value=mock_results)
+
+        resp = test_client.get("/search?q=test")
+        data = resp.json()
+        assert all("available" in r for r in data["results"])
+        assert all(r["available"] is False for r in data["results"])
+
+    def test_matches_by_browse_id(self, test_client, mocker):
+        from zimmporter.core import Zimmporter
+
+        self._add_available("Test Artist", "Test Album", browse_id="MPREb_abc123")
+
+        mock_results = [
+            {
+                "resultType": "album",
+                "browseId": "MPREb_abc123",
+                "title": "Test Album",
+                "artist": ["Test Artist"],
+                "thumbnail": "https://x.jpg",
+            },
+            {
+                "resultType": "album",
+                "browseId": "MPREb_zzz999",
+                "title": "Other Album",
+                "artist": ["Other Artist"],
+                "thumbnail": "https://x.jpg",
+            },
+        ]
+        mocker.patch.object(Zimmporter, "search", return_value=mock_results)
+
+        resp = test_client.get("/search?q=test")
+        data = resp.json()
+        by_id = {r["browseId"]: r for r in data["results"]}
+        assert by_id["MPREb_abc123"]["available"] is True
+        assert by_id["MPREb_zzz999"]["available"] is False
+
+    def test_matches_by_normalized_name(self, test_client, mocker):
+        from zimmporter.core import Zimmporter
+
+        self._add_available("Test Artist", "Test Album")
+
+        mock_results = [
+            {
+                "resultType": "album",
+                "browseId": "MPREb_new",
+                "title": "  test  album ",
+                "artist": ["TEST artist"],
+                "thumbnail": "https://x.jpg",
+            }
+        ]
+        mocker.patch.object(Zimmporter, "search", return_value=mock_results)
+
+        resp = test_client.get("/search?q=test")
+        data = resp.json()
+        assert data["results"][0]["available"] is True
+
+    def test_matches_playlist_by_title(self, test_client, mocker):
+        from zimmporter.core import Zimmporter
+
+        self._add_available("playlists", "Test Playlist")
+
+        mock_results = [
+            {
+                "resultType": "featured_playlists",
+                "browseId": "VLfeat_1",
+                "title": "Test Playlist",
+                "author": "YT Music",
+                "thumbnail": "https://x.jpg",
+            }
+        ]
+        mocker.patch.object(Zimmporter, "search", return_value=mock_results)
+
+        resp = test_client.get("/search?q=test")
+        data = resp.json()
+        assert data["results"][0]["available"] is True

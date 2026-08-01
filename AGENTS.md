@@ -59,12 +59,15 @@ Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API
 ## Architecture
 - `zimmporter.core.Zimmporter` — core logic: search (ytmusicapi), download (yt_dlp + billiard.Pool)
 - `zimmporter.core.Zimmporter.search()` — returns structured list of dicts (no print/emoji)
-- `api/routes/search.py` — `GET /search` calls `Zimmporter.search()` synchronously; supports `limit` (1-50); results cached in Valkey db 2 with 5 min TTL
+- `api/routes/search.py` — `GET /search` calls `Zimmporter.search()` synchronously; supports `limit` (1-50); results cached in Valkey db 2 with 5 min TTL; enriches each result with an `available` flag from the `available_albums` index (after cache read, so it stays fresh)
+- `tasks/index.py` — Celery task `tasks.index_albums` scans the S3 bucket (`{artist}/{album}/` prefixes) and reconciles the `available_albums` table (upsert + prune); `upsert_available_album()` is also called by download tasks to record exact `browse_id`s
+- `api/scheduler.py` — periodic dispatcher running inside the API pod (no Celery beat container): dispatches `tasks.index_albums` every `INDEX_INTERVAL_MINUTES` (default 30) via `send_task`, guarded by a Valkey lock so multiple API replicas dispatch only once per interval
 - `api/routes/download.py` — `POST /download/album|/playlist` creates DB Job row, then triggers Celery task
 - `api/routes/cookies.py` — `GET /cookies` (metadata) and `POST /cookies` (multipart upload) manage the yt-dlp cookies file; validated, written atomically into `COOKIE_DIR` (shared `cookies_data` volume), contents never exposed
 - `api/routes/jobs.py` — `GET /jobs/<id>` reads Job + Song rows from DB
 - `api/app.py` — `GET /health` checks API, Valkey connectivity, Celery worker liveness, and MariaDB; always returns HTTP 200 with `"status": "ok"` or `"degraded"` to report partial outages without breaking callers; also purges jobs older than `JOB_RETENTION_DAYS` (default 0 = never purge) and fails stalled jobs via `_fail_stalled_jobs()` (controlled by `JOB_STALLED_TIMEOUT`, default 5m); `AuthMiddleware` adds optional auth (`USE_SIMPLE_AUTH`/`USE_SOCIAL_LOGIN` env vars) to all routes except `/health`
-- `tasks/download.py` — Celery tasks wrap `download_bulk` with `billiard.Pool`. Updates task state per song for progress tracking.
+- `tasks/download.py` — Celery tasks wrap `download_bulk` with `billiard.Pool`. Updates task state per song for progress tracking. Records successfully downloaded albums/playlists into `available_albums` with their `browse_id`.
+- The S3 library index is triggered from the API pod (`api/scheduler.py`, interval `INDEX_INTERVAL_MINUTES`), not from Celery beat — no beat container/deployment exists.
 - Logger + `YTDL_OPTS` mutated on module level — reinitialized in each forked worker because state is lost after `billiard.Pool` fork
 
 ## Gotchas

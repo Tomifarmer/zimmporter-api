@@ -14,7 +14,7 @@ Then open the Swagger UI at http://localhost:8000/docs or try the API directly.
 
 ### Endpoints
 
-- **`GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes.
+- **`GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes. Each result includes an `available` boolean flagging albums/playlists already present in the S3 library index (refreshed regularly by the Celery beat `tasks.index_albums` task).
 - **`POST /download/album`** — Queue one or more albums (`id: "MPREb_xxx,MPREb_yyy"`) with concurrency (`concurrent`: 1–32). Returns `job_id`.
 - **`POST /download/playlist`** — Queue one or more playlists. Same flow as album download.
 - **`GET /jobs/<id>`** — Poll a specific job for per-song progress.
@@ -133,6 +133,18 @@ Key variables:
 | YouTube | `POT_PROVIDER_URL` | unset | BgUtils POT provider HTTP server URL (yt-dlp PO tokens to bypass bot checks) |
 | YouTube | `YTDLP_COOKIEFILE` | unset | Path to a Netscape cookies file from an age-confirmed YouTube account (enables age-restricted downloads) |
 | Cookies | `COOKIE_DIR` | `/var/zimmporter/cookies` | Directory the API writes uploaded cookie files into (shared Docker volume with the worker) |
+| Index | `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the S3 library index scan |
+
+### S3 library index
+
+The API pod runs a lightweight background scheduler (`api/scheduler.py`) that periodically dispatches
+the `tasks.index_albums` Celery task. The task runs on a **worker** (which has boto3 + the S3
+credentials), scans the S3 bucket, and records every `{artist}/{album}/` prefix in the
+`available_albums` table. Successful download jobs also record the exact YT Music `browse_id`, so
+`GET /search` can flag already-imported albums/playlists via an `available` field (matched by browse
+ID or normalized artist + title). Entries no longer present in S3 are pruned automatically. A Valkey
+lock in the API scheduler de-duplicates the dispatch when the API runs with multiple replicas — no
+separate Celery beat container is needed.
 
 ### YouTube cookies upload
 
