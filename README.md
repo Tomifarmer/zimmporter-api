@@ -128,6 +128,8 @@ Key variables:
 | Auth | `USE_SOCIAL_LOGIN` | `false` | Enable social login Bearer token auth (OIDC/GitHub) on all routes except `/health` |
 | Auth | `GITHUB_CLIENT_ID` | unset | Enables GitHub Bearer token validation via GitHub API (requires `USE_SOCIAL_LOGIN=true`) |
 | SSL | `CA_CERT`, `REQUESTS_CA_BUNDLE` | unset | Path to private CA PEM file for HTTPS clients |
+| YouTube | `POT_PROVIDER_URL` | unset | BgUtils POT provider HTTP server URL (yt-dlp PO tokens to bypass bot checks) |
+| YouTube | `YTDLP_COOKIEFILE` | unset | Path to a Netscape cookies file from an age-confirmed YouTube account (enables age-restricted downloads) |
 
 ## Testing
 

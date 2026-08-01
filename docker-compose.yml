@@ -75,8 +75,10 @@ services:
       - AWS_BUCKET=test
       - AWS_DEFAULT_REGION=us-east-1
       - POT_PROVIDER_URL=http://bgutil-provider:4416
+      - YTDLP_COOKIEFILE=/etc/zimmporter/cookies.txt
     volumes:
       - zimmer_data:/data/zimmer/importer
+      - ./cookies.txt:/etc/zimmporter/cookies.txt:ro
     depends_on:
       bgutil-provider:
         condition: service_started

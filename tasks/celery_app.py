@@ -16,10 +16,28 @@ scheme works because the ``redis`` Python client is drop-in compatible.
 import os
 
 from celery import Celery
+from celery.signals import worker_process_init
 
 from zimmporter.cert import configure_ssl
 
 configure_ssl()
+
+
+@worker_process_init.connect
+def _warmup_ytdlp_plugins(**kwargs) -> None:
+    """Load yt-dlp plugins once, serially, before any task threads race on them.
+
+    ``yt_dlp.YoutubeDL`` loads plugins lazily on first instantiation, guarded by
+    a process-global flag that is not thread-safe.  When a download task fans out
+    over a ``ThreadPoolExecutor``, several threads can construct ``YoutubeDL``
+    concurrently on first use, each re-importing the POT provider plugin modules
+    and tripping yt-dlp's "already registered" assertion.  Pre-loading them here
+    (which runs once per forked worker process, before any task is consumed)
+    removes the race.  Imported lazily so the API container (no yt-dlp) is safe.
+    """
+    from yt_dlp.plugins import load_all_plugins
+
+    load_all_plugins()
 
 broker_url = os.environ.get("CELERY_BROKER", "redis://localhost:6379/0")
 backend_url = os.environ.get("CELERY_BACKEND", "redis://localhost:6379/1")

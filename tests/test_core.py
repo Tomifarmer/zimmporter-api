@@ -1,6 +1,7 @@
+import os
 from unittest.mock import MagicMock
 
-from zimmporter.core import Zimmporter
+from zimmporter.core import Zimmporter, apply_cookie_config
 
 
 class TestBuildS3Path:
@@ -212,3 +213,24 @@ class TestDownloadPlaylistSong:
         assert result["album"] == "My Playlist"
         assert result["status"] == "success"
         assert result["s3_path"] == "playlists/My Playlist/PL Track.m4a"
+
+
+class TestApplyCookieConfig:
+    def test_cookiefile_added_when_file_exists(self, tmp_path):
+        source = tmp_path / "cookies.txt"
+        source.write_text("# Netscape HTTP Cookie File\n")
+        opts = {"cachedir": str(tmp_path / "cache")}
+        apply_cookie_config(opts, str(source))
+        assert opts["cookiefile"] == str(tmp_path / "cache" / "cookies" / "cookies.txt")
+        assert os.path.isfile(opts["cookiefile"])
+        assert opts["cookiefile"] != str(source)
+
+    def test_cookiefile_skipped_when_env_unset(self):
+        opts = {}
+        apply_cookie_config(opts, "")
+        assert "cookiefile" not in opts
+
+    def test_cookiefile_skipped_when_file_missing(self):
+        opts = {}
+        apply_cookie_config(opts, "/nonexistent/cookies.txt")
+        assert "cookiefile" not in opts

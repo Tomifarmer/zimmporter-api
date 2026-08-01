@@ -6,5 +6,8 @@ venv*/
 .env
 .env.local
 
+# YouTube cookies (age-confirmed account — never commit)
+cookies.txt
+
 # Editors
 .idea/

@@ -31,6 +31,11 @@ temp_dir = "/data/zimmer/importer/"
 #: ``youtubepot-bgutilhttp`` provider. Empty disables the integration.
 POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "").strip()
 
+#: Path to a Netscape-format cookies file from an age-confirmed YouTube account.
+#: When set and the file exists, yt-dlp authenticates with it, which allows
+#: downloading age-restricted content. Empty disables the integration.
+YTDLP_COOKIEFILE = os.getenv("YTDLP_COOKIEFILE", "").strip()
+
 #: Global yt-dlp options dict.
 #:
 #: Mutated per-call (``outtmpl``), shared across the main process and
@@ -56,6 +61,36 @@ YTDL_OPTS = {
 
 if POT_PROVIDER_URL:
     YTDL_OPTS["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]}}
+
+
+def apply_cookie_config(opts: dict, cookie_file: str) -> None:
+    """Add a ``cookiefile`` to yt-dlp opts when the file exists.
+
+    yt-dlp may rewrite the cookies file to persist refreshed cookies, so the
+    configured file is copied into the yt-dlp cache directory first.  This
+    keeps the source file read-only (e.g. a read-only Docker mount or a
+    secret) while letting yt-dlp work on a writable copy.
+
+    Args:
+        opts: yt-dlp options dict to mutate in place.
+        cookie_file: Path to a Netscape-format cookies file. Empty skips
+            the integration entirely; a missing file only logs a warning.
+    """
+    if not cookie_file:
+        return
+    if not os.path.isfile(cookie_file):
+        logging.getLogger("Zimmporter").warning(
+            f"YTDLP_COOKIEFILE path does not exist ({cookie_file}), continuing without cookies."
+        )
+        return
+    cookie_dir = os.path.join(opts.get("cachedir", "/tmp/yt-dlp-cache"), "cookies")
+    os.makedirs(cookie_dir, exist_ok=True)
+    writable_copy = os.path.join(cookie_dir, "cookies.txt")
+    shutil.copyfile(cookie_file, writable_copy)
+    opts["cookiefile"] = writable_copy
+
+
+apply_cookie_config(YTDL_OPTS, YTDLP_COOKIEFILE)
 
 
 # How many times to retry a song if download or conversion fails due to race conditions.
