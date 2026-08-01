@@ -63,6 +63,16 @@ if POT_PROVIDER_URL:
     YTDL_OPTS["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]}}
 
 
+def _cookies_stale() -> bool:
+    """Whether a worker has flagged the current cookies as stale in Valkey."""
+    try:
+        from zimmporter.cookie_health import is_stale
+
+        return is_stale()
+    except Exception:
+        return False
+
+
 def apply_cookie_config(opts: dict, cookie_file: str) -> None:
     """Add a ``cookiefile`` to yt-dlp opts when the file exists.
 
@@ -70,6 +80,11 @@ def apply_cookie_config(opts: dict, cookie_file: str) -> None:
     configured file is copied into the yt-dlp cache directory first.  This
     keeps the source file read-only (e.g. a read-only Docker mount or a
     secret) while letting yt-dlp work on a writable copy.
+
+    When the cookies have been flagged stale (rejected by YouTube), the
+    file is skipped entirely so yt-dlp runs anonymously instead of failing
+    every download with the bot check.  A fresh upload clears the flag and
+    re-enables cookies on the next call.
 
     Args:
         opts: yt-dlp options dict to mutate in place.
@@ -81,6 +96,12 @@ def apply_cookie_config(opts: dict, cookie_file: str) -> None:
     if not os.path.isfile(cookie_file):
         logging.getLogger("Zimmporter").warning(
             f"YTDLP_COOKIEFILE path does not exist ({cookie_file}), continuing without cookies."
+        )
+        return
+    if _cookies_stale():
+        opts.pop("cookiefile", None)
+        logging.getLogger("Zimmporter").warning(
+            "YTDLP_COOKIEFILE present but cookies are flagged stale; continuing without cookies."
         )
         return
     cookie_dir = os.path.join(opts.get("cachedir", "/tmp/yt-dlp-cache"), "cookies")
@@ -104,6 +125,39 @@ BACKOFF_MULTIPLIER = 2
 
 # Cap on backoff-delayed retries (skip backoff after this many attempts).
 BACKOFF_MAX_ATTEMPTS = 2
+
+#: Substrings in yt-dlp error messages that indicate the account cookies are
+#: stale/rotated rather than a transient download failure.
+COOKIE_STALE_MARKERS = (
+    "Sign in to confirm you're not a bot",
+    "cookies are no longer valid",
+    "rotated in the browser",
+    "account cookies are no longer valid",
+)
+
+
+def _flag_stale_cookies(err: Exception) -> None:
+    """Record stale cookies in Valkey and drop them from future downloads.
+
+    Called from the per-song retry loops.  Besides flagging the cookies, the
+    ``cookiefile`` is removed from the shared :data:`YTDL_OPTS` so the
+    remaining retries (and any other songs in the job) run without cookies
+    instead of repeating the bot check.  Idempotent; failures are swallowed
+    so a flaky Valkey never breaks a download.
+    """
+    if not any(marker in str(err) for marker in COOKIE_STALE_MARKERS):
+        return
+    try:
+        from zimmporter.cookie_health import mark_stale
+
+        mark_stale()
+    except Exception:
+        pass
+    if "cookiefile" in YTDL_OPTS:
+        YTDL_OPTS.pop("cookiefile", None)
+        logging.getLogger("Zimmporter").warning(
+            "Cookies rejected by YouTube; removing them so retries run without cookies."
+        )
 
 
 class Zimmporter:
@@ -369,6 +423,7 @@ class Zimmporter:
                     break
                 except Exception as err:
                     is_403 = getattr(err, "response", None) is not None and err.response.status_code == 403
+                    _flag_stale_cookies(err)
                     zimm.logger.warning(f"[{sid}] Attempt {attempt + 1}/{MAX_RETRIES} failed for {title}: {err}")
                     if attempt < MAX_RETRIES - 1:
                         delay = (
@@ -463,6 +518,7 @@ class Zimmporter:
                     break
                 except Exception as err:
                     is_403 = getattr(err, "response", None) is not None and err.response.status_code == 403
+                    _flag_stale_cookies(err)
                     zimm.logger.warning(f"[{sid}] Attempt {attempt + 1}/{MAX_RETRIES} failed for {title}: {err}")
                     if attempt < MAX_RETRIES - 1:
                         delay = (

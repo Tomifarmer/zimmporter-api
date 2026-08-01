@@ -43,6 +43,8 @@ class CookieStatus(BaseModel):
         cookie_count: Number of parsed cookies (0 when absent).
         domains: Sorted list of unique cookie domains present in the file.
         modified_at: UTC timestamp of the last upload (None when absent).
+        is_stale: Whether the cookies have been detected as stale/invalid
+            (by a worker download or an expired session cookie).
     """
 
     exists: bool
@@ -50,6 +52,7 @@ class CookieStatus(BaseModel):
     cookie_count: int = 0
     domains: list[str] = []
     modified_at: dt.datetime | None = None
+    is_stale: bool = False
 
 
 class JobResponse(BaseModel):

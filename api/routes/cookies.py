@@ -20,6 +20,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from api.models import CookieStatus
+from zimmporter import cookie_health
 
 #: Directory the API writes cookies into (shared volume with the worker).
 COOKIE_DIR = os.environ.get("COOKIE_DIR", "/var/zimmporter/cookies")
@@ -29,6 +30,17 @@ COOKIE_FILENAME = "cookies.txt"
 
 #: Maximum accepted cookies file size (2 MB).
 _MAX_COOKIE_SIZE = 2 * 1024 * 1024
+
+#: Session cookies whose expiry drives the date-based staleness check.
+_SESSION_COOKIE_NAMES = {
+    "SID",
+    "__Secure-1PSID",
+    "__Secure-3PSID",
+    "SAPISID",
+    "__Secure-1PAPISID",
+    "__Secure-3PAPISID",
+    "LOGIN_INFO",
+}
 
 cookies_router = APIRouter(prefix="/cookies", tags=["cookies"])
 
@@ -42,9 +54,9 @@ def _parse_cookies(content: bytes) -> list[dict]:
     """Parse Netscape-format cookie file content.
 
     Uses the stdlib :class:`http.cookiejar.MozillaCookieJar` to validate
-    the file and return a list of ``{"domain", "name"}`` summaries.  Raises
-    ``HTTPException(400)`` when the content is empty or not a valid cookie
-    file.
+    the file and return a list of ``{"domain", "name", "expires"}``
+    summaries.  Raises ``HTTPException(400)`` when the content is empty
+    or not a valid cookie file.
 
     Args:
         content: Raw bytes of a Netscape-format cookies file.
@@ -62,7 +74,23 @@ def _parse_cookies(content: bytes) -> list[dict]:
             jar.load(tmp.name, ignore_discard=True, ignore_expires=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Not a valid Netscape cookies file") from exc
-    return [{"domain": cookie.domain, "name": cookie.name} for cookie in jar]
+    return [
+        {"domain": cookie.domain, "name": cookie.name, "expires": cookie.expires} for cookie in jar
+    ]
+
+
+def _cookies_expired(cookies: list[dict]) -> bool:
+    """Whether any session cookie has passed its expiration timestamp.
+
+    Session cookies (``expires`` 0 or None) are skipped — only real expiry
+    dates count here.  This catches age-stale exports; rotated cookies that
+    still carry future expiries are caught by the worker-set flag instead.
+    """
+    now = int(datetime.datetime.now(datetime.UTC).timestamp())
+    for cookie in cookies:
+        if cookie["name"] in _SESSION_COOKIE_NAMES and cookie.get("expires") and cookie["expires"] <= now:
+            return True
+    return False
 
 
 @cookies_router.get("", response_model=CookieStatus)
@@ -91,6 +119,7 @@ def get_cookies() -> CookieStatus:
         cookie_count=len(cookies),
         domains=sorted({cookie["domain"] for cookie in cookies}),
         modified_at=modified_at,
+        is_stale=cookie_health.is_stale() or _cookies_expired(cookies),
     )
 
 
@@ -127,6 +156,8 @@ def upload_cookies(
         if os.path.exists(tmp_path):
             with suppress(OSError):
                 os.remove(tmp_path)
+
+    cookie_health.clear_stale()
 
     return CookieStatus(
         exists=True,

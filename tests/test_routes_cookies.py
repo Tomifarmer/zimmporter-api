@@ -42,6 +42,27 @@ class TestGetCookies:
         data = test_client.get("/cookies").json()
         assert "fake_sid_value" not in str(data)
 
+    def test_not_stale_when_no_flag(self, test_client, cookie_dir):
+        (cookie_dir / "cookies.txt").write_bytes(VALID_COOKIE_FILE)
+        data = test_client.get("/cookies").json()
+        assert data["is_stale"] is False
+
+    def test_stale_when_flag_set(self, test_client, cookie_dir, monkeypatch):
+        (cookie_dir / "cookies.txt").write_bytes(VALID_COOKIE_FILE)
+        monkeypatch.setattr("api.routes.cookies.cookie_health.is_stale", lambda: True)
+        data = test_client.get("/cookies").json()
+        assert data["is_stale"] is True
+
+    def test_stale_when_session_cookie_expired(self, test_client, cookie_dir):
+        expired = (
+            b"# Netscape HTTP Cookie File\n"
+            b".youtube.com\tTRUE\t/\tTRUE\t1000000000\tSID\tfake_sid_value\n"
+        )
+        (cookie_dir / "cookies.txt").write_bytes(expired)
+        data = test_client.get("/cookies").json()
+        assert data["exists"] is True
+        assert data["is_stale"] is True
+
 
 class TestUploadCookies:
     def test_upload_valid_file(self, test_client, cookie_dir):
@@ -86,3 +107,13 @@ class TestUploadCookies:
         test_client.post("/cookies", files={"file": ("cookies.txt", VALID_COOKIE_FILE, "text/plain")})
         assert [p.name for p in cookie_dir.iterdir()] == ["cookies.txt"]
         assert os.path.exists(cookie_dir / "cookies.txt")
+
+    def test_upload_clears_stale_flag(self, test_client, cookie_dir, monkeypatch):
+        from zimmporter import cookie_health
+
+        monkeypatch.setattr("api.routes.cookies.cookie_health.is_stale", lambda: True)
+        clear = []
+        monkeypatch.setattr(cookie_health, "clear_stale", lambda: clear.append(True))
+        resp = test_client.post("/cookies", files={"file": ("cookies.txt", VALID_COOKIE_FILE, "text/plain")})
+        assert resp.status_code == 200
+        assert clear == [True]

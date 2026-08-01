@@ -1,7 +1,7 @@
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from zimmporter.core import Zimmporter, apply_cookie_config
+from zimmporter.core import Zimmporter, _flag_stale_cookies, apply_cookie_config
 
 
 class TestBuildS3Path:
@@ -234,3 +234,62 @@ class TestApplyCookieConfig:
         opts = {}
         apply_cookie_config(opts, "/nonexistent/cookies.txt")
         assert "cookiefile" not in opts
+
+    def test_cookiefile_skipped_when_stale(self, tmp_path, monkeypatch):
+        import zimmporter.cookie_health as cookie_health
+
+        monkeypatch.setattr(cookie_health, "is_stale", lambda: True)
+        source = tmp_path / "cookies.txt"
+        source.write_text("# Netscape HTTP Cookie File\n")
+        opts = {"cachedir": str(tmp_path / "cache")}
+        apply_cookie_config(opts, str(source))
+        assert "cookiefile" not in opts
+
+    def test_cookiefile_removed_when_stale(self, tmp_path, monkeypatch):
+        import zimmporter.cookie_health as cookie_health
+
+        monkeypatch.setattr(cookie_health, "is_stale", lambda: True)
+        source = tmp_path / "cookies.txt"
+        source.write_text("# Netscape HTTP Cookie File\n")
+        opts = {"cachedir": str(tmp_path / "cache"), "cookiefile": "/old/cookies.txt"}
+        apply_cookie_config(opts, str(source))
+        assert "cookiefile" not in opts
+
+
+class TestFlagStaleCookies:
+    @patch("zimmporter.cookie_health.mark_stale")
+    def test_marks_stale_on_bot_check_error(self, mock_mark):
+        _flag_stale_cookies(Exception("Sign in to confirm you're not a bot. See FAQ."))
+        mock_mark.assert_called_once()
+
+    @patch("zimmporter.cookie_health.mark_stale")
+    def test_marks_stale_on_rotation_warning(self, mock_mark):
+        _flag_stale_cookies(Exception("YouTube account cookies are no longer valid. They have likely been rotated."))
+        mock_mark.assert_called_once()
+
+    @patch("zimmporter.cookie_health.mark_stale")
+    def test_does_not_mark_on_unrelated_error(self, mock_mark):
+        _flag_stale_cookies(Exception("HTTP Error 404: Not Found"))
+        mock_mark.assert_not_called()
+
+    @patch("zimmporter.cookie_health.mark_stale")
+    def test_drops_cookiefile_from_opts_on_stale(self, mock_mark):
+        from zimmporter.core import YTDL_OPTS
+
+        YTDL_OPTS["cookiefile"] = "/tmp/yt-dlp-cache/cookies/cookies.txt"
+        try:
+            _flag_stale_cookies(Exception("Sign in to confirm you're not a bot. See FAQ."))
+            assert "cookiefile" not in YTDL_OPTS
+        finally:
+            YTDL_OPTS.pop("cookiefile", None)
+
+    @patch("zimmporter.cookie_health.mark_stale")
+    def test_keeps_cookiefile_on_unrelated_error(self, mock_mark):
+        from zimmporter.core import YTDL_OPTS
+
+        YTDL_OPTS["cookiefile"] = "/tmp/yt-dlp-cache/cookies/cookies.txt"
+        try:
+            _flag_stale_cookies(Exception("HTTP Error 404: Not Found"))
+            assert YTDL_OPTS["cookiefile"] == "/tmp/yt-dlp-cache/cookies/cookies.txt"
+        finally:
+            YTDL_OPTS.pop("cookiefile", None)

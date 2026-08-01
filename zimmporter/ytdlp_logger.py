@@ -61,6 +61,24 @@ class YTDLPLogger:
     def warning(self, msg: str) -> None:
         """Log a warning-level message."""
         self.logger.warning(msg, extra=self.extra_logging)
+        if "cookies are no longer valid" in msg or "rotated in the browser" in msg:
+            try:
+                from zimmporter.cookie_health import mark_stale
+
+                mark_stale()
+            except Exception:
+                pass
+            try:
+                from zimmporter.core import YTDL_OPTS
+
+                if "cookiefile" in YTDL_OPTS:
+                    YTDL_OPTS.pop("cookiefile", None)
+                    self.logger.warning(
+                        "Cookies rejected by YouTube; removing them so retries run without cookies.",
+                        extra=self.extra_logging,
+                    )
+            except Exception:
+                pass
 
     def error(self, msg: str) -> None:
         """Log an error-level message."""
