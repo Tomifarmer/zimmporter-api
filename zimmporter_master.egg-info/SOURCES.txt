@@ -20,9 +20,11 @@ api/__init__.py
 api/app.py
 api/models.py
 api/routes/__init__.py
+api/routes/cookies.py
 api/routes/download.py
 api/routes/jobs.py
 api/routes/search.py
+api/routes/thumbnail.py
 db/__init__.py
 db/engine.py
 db/models.py
@@ -40,9 +42,11 @@ tests/test_cert.py
 tests/test_core.py
 tests/test_health.py
 tests/test_postprocessors.py
+tests/test_routes_cookies.py
 tests/test_routes_download.py
 tests/test_routes_jobs.py
 tests/test_routes_search.py
+tests/test_routes_thumbnail.py
 zimmporter/__init__.py
 zimmporter/_version.py
 zimmporter/cert.py

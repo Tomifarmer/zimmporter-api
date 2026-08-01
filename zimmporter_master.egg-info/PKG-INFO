@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: zimmporter-master
-Version: 1.0.3.dev0+g3f968f50a.d20260730
+Version: 1.0.3.dev3+g5b301252c.d20260801
 Summary: Add your description here
 Requires-Python: >=3.14
 Requires-Dist: celery[redis]<6.0,>=5.3
@@ -10,6 +10,7 @@ Requires-Dist: mutagen>=1.48.1
 Requires-Dist: pydantic<3.0,>=2.0
 Requires-Dist: PyJWT[crypto]<3.0,>=2.9
 Requires-Dist: pymysql>=1.1
+Requires-Dist: python-multipart>=0.0.9
 Requires-Dist: requests>=2.34.2
 Requires-Dist: sqlalchemy<3.0,>=2.0
 Requires-Dist: uvicorn[standard]<1.0,>=0.29
