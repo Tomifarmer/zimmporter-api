@@ -64,7 +64,11 @@ If the configured file does not exist, a warning is logged and the clients fall 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the periodic S3 library index scan (min `1`) |
+| `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the periodic library index scan (min `1`) |
+| `INDEX_SOURCE` | `s3` | Which library sources feed the `available_albums` index: `s3` (S3 prefix scan), `navidrome`, or `both` |
+| `NAVIDROME_URL` | — | Base URL of the Navidrome server (worker-side; required when `INDEX_SOURCE` uses navidrome) |
+| `NAVIDROME_USER` | — | Subsonic API username for Navidrome (worker-side) |
+| `NAVIDROME_PASS` | — | Subsonic API password for Navidrome (worker-side) |
 
 ### Cookies (YouTube auth)
 

@@ -1,12 +1,16 @@
-"""S3 library index task.
+"""Library index tasks.
 
-Scans the S3 bucket for albums/playlists present in the backend library and
-upserts them into the :class:`db.models.AvailableAlbum` table so search
-results can be flagged as already imported.
+Reconcile the :class:`db.models.AvailableAlbum` table with the albums
+present in the backend library so search results can be flagged as already
+imported.  Two sources are supported, selected via ``INDEX_SOURCE``:
 
-Runs periodically via Celery beat (see :data:`tasks.celery_app.celery_app`),
-but also exposes :func:`upsert_available_album` which download tasks call
-with the exact ``browse_id`` for reliable matching.
+* ``s3`` (default) — scan the S3 bucket (``tasks.index_albums``).
+* ``navidrome`` — query a Navidrome server's Subsonic API
+  (``tasks.index_navidrome``).
+* ``both`` — run both and merge the results.
+
+Also exposes :func:`upsert_available_album` which download tasks call with
+the exact ``browse_id`` for reliable matching.
 
 The S3 layout mirrors :meth:`zimmporter.core.Zimmporter._build_s3_path`:
 ``{artist}/{album}/{track} - {title}.m4a``.
@@ -112,39 +116,31 @@ def upsert_available_album(
         logger.warning("Failed to upsert available album %s - %s: %s", artist, album, exc)
 
 
-def _run_index() -> dict:
-    """Scan the S3 bucket and reconcile the ``available_albums`` index.
+def _reconcile_available(found) -> dict:
+    """Upsert + prune the ``available_albums`` table from ``(artist, album)`` keys.
+
+    Entries present in ``found`` are inserted or refreshed; entries in the
+    table but absent from ``found`` are pruned.  Existing ``browse_id`` values
+    are preserved (the scan sources have no browse IDs).
+
+    Args:
+        found: Iterable of ``(artist, album, track_count)`` tuples.
 
     Returns:
-        Dict with ``indexed`` (entries present in S3), ``added`` (new
-        entries), ``updated`` (entries refreshed), ``pruned`` (entries no
-        longer present in S3) and ``scanned_at`` ISO timestamps.
+        Dict with ``indexed``, ``added``, ``updated``, ``pruned`` and
+        ``scanned_at`` (ISO timestamp) keys.
     """
-    bucket = os.getenv("AWS_BUCKET")
-    if not bucket:
-        logger.warning("AWS_BUCKET is not set; skipping library index scan")
-        return {"indexed": 0, "added": 0, "updated": 0, "pruned": 0, "scanned_at": None}
-
-    logger.info("S3 library index scan starting (bucket=%s)", bucket)
-    try:
-        client = _get_s3_client()
-        found = _scan_bucket(client, bucket)
-    except Exception as exc:
-        logger.error("S3 library index scan failed: %s", exc)
-        raise
-
-    if not found:
-        logger.info("S3 library index scan found no albums in bucket %s", bucket)
+    found = list(found)
+    found_keys = {(artist, album) for artist, album, _ in found}
 
     added: list[str] = []
     updated: list[str] = []
     pruned: list[str] = []
-    found_keys = {(artist, album) for artist, album, _ in found}
+    now = datetime.datetime.now(datetime.UTC)
     try:
         with get_session() as session:
             existing = session.query(AvailableAlbum).all()
             existing_by_key = {(row.artist, row.album): row for row in existing}
-            now = datetime.datetime.now(datetime.UTC)
 
             for artist, album, track_count in found:
                 row = existing_by_key.get((artist, album))
@@ -174,7 +170,7 @@ def _run_index() -> dict:
         raise
 
     logger.info(
-        "S3 library index scan complete: %d indexed (%d added, %d updated), %d pruned",
+        "Library index reconcile complete: %d indexed (%d added, %d updated), %d pruned",
         len(found),
         len(added),
         len(updated),
@@ -196,7 +192,59 @@ def _run_index() -> dict:
     }
 
 
+def _run_index() -> dict:
+    """Scan the S3 bucket and reconcile the ``available_albums`` index.
+
+    Returns:
+        Dict with ``indexed`` (entries present in S3), ``added`` (new
+        entries), ``updated`` (entries refreshed), ``pruned`` (entries no
+        longer present in S3) and ``scanned_at`` ISO timestamps.
+    """
+    bucket = os.getenv("AWS_BUCKET")
+    if not bucket:
+        logger.warning("AWS_BUCKET is not set; skipping library index scan")
+        return {"indexed": 0, "added": 0, "updated": 0, "pruned": 0, "scanned_at": None}
+
+    logger.info("S3 library index scan starting (bucket=%s)", bucket)
+    try:
+        client = _get_s3_client()
+        found = _scan_bucket(client, bucket)
+    except Exception as exc:
+        logger.error("S3 library index scan failed: %s", exc)
+        raise
+
+    if not found:
+        logger.info("S3 library index scan found no albums in bucket %s", bucket)
+
+    result = _reconcile_available(found)
+    result["indexed"] = len(found)
+    return result
+
+
+def _run_navidrome_index() -> dict:
+    """Query Navidrome and reconcile the ``available_albums`` index.
+
+    Returns:
+        Dict with ``indexed``, ``added``, ``updated``, ``pruned`` and
+        ``scanned_at`` keys (``indexed`` from the Navidrome album list).
+    """
+    from zimmporter.navidrome import get_albums
+
+    logger.info("Navidrome library index scan starting")
+    found = get_albums()
+
+    result = _reconcile_available(found)
+    result["indexed"] = len(found)
+    return result
+
+
 @celery_app.task(name="tasks.index_albums")
 def index_albums() -> dict:
     """Celery task wrapper around :func:`_run_index`."""
     return _run_index()
+
+
+@celery_app.task(name="tasks.index_navidrome")
+def index_navidrome() -> dict:
+    """Celery task wrapper around :func:`_run_navidrome_index`."""
+    return _run_navidrome_index()

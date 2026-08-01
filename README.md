@@ -133,16 +133,20 @@ Key variables:
 | YouTube | `POT_PROVIDER_URL` | unset | BgUtils POT provider HTTP server URL (yt-dlp PO tokens to bypass bot checks) |
 | YouTube | `YTDLP_COOKIEFILE` | unset | Path to a Netscape cookies file from an age-confirmed YouTube account (enables age-restricted downloads) |
 | Cookies | `COOKIE_DIR` | `/var/zimmporter/cookies` | Directory the API writes uploaded cookie files into (shared Docker volume with the worker) |
-| Index | `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the S3 library index scan |
+| Index | `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the library index scan |
+| Index | `INDEX_SOURCE` | `s3` | Which library sources feed the available-albums index: `s3`, `navidrome`, or `both` |
+| Index | `NAVIDROME_URL` / `NAVIDROME_USER` / `NAVIDROME_PASS` | unset | Navidrome connection for the Navidrome index source (worker-side) |
 
 ### S3 library index
 
 The API pod runs a lightweight background scheduler (`api/scheduler.py`) that periodically dispatches
-the `tasks.index_albums` Celery task. The task runs on a **worker** (which has boto3 + the S3
-credentials), scans the S3 bucket, and records every `{artist}/{album}/` prefix in the
+the library index task(s). The source is selected via `INDEX_SOURCE`: the `tasks.index_albums` Celery task
+runs on a **worker** (which has boto3 + the S3 credentials), scans the S3 bucket, and records every
+`{artist}/{album}/` prefix; the `tasks.index_navidrome` task queries a Navidrome server's Subsonic API
+(`getAlbumList2`) for the albums it has indexed — a tag-accurate view of the same library. Both write to the
 `available_albums` table. Successful download jobs also record the exact YT Music `browse_id`, so
 `GET /search` can flag already-imported albums/playlists via an `available` field (matched by browse
-ID or normalized artist + title). Entries no longer present in S3 are pruned automatically. A Valkey
+ID or normalized artist + title). Entries no longer present in the library are pruned automatically. A Valkey
 lock in the API scheduler de-duplicates the dispatch when the API runs with multiple replicas — no
 separate Celery beat container is needed.
 

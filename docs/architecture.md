@@ -60,7 +60,7 @@ Client (curl / UI)
 | Module | Purpose |
 |--------|---------|
 | `app.py` | FastAPI instance, startup SSL config + DB init, `/health` endpoint (always returns HTTP 200 with `"ok"` or `"degraded"` status to report partial outages without breaking callers), stalled-job cleanup (`JOB_STALLED_TIMEOUT`), CORS middleware |
-| `scheduler.py` | Periodic S3 library index dispatcher (`INDEX_INTERVAL_MINUTES`, default 30) — runs inside the API pod, guarded by a Valkey lock (db 4), no Celery beat container |
+| `scheduler.py` | Periodic library index dispatcher (`INDEX_INTERVAL_MINUTES`, default 30; `INDEX_SOURCE` selects `s3`/`navidrome`/`both`) — runs inside the API pod, guarded by a Valkey lock (db 4), no Celery beat container |
 | `models.py` | Pydantic request/response models for OpenAPI schema generation |
 | `routes/search.py` | `GET /search` — synchronous ytmusicapi query with Valkey caching (5 min TTL, db 2), supports `limit` and `type` (albums/featured_playlists/community_playlists); enriches results with an `available` flag from the `available_albums` index; when `API_PROXY_FETCH=true` fetches and embeds thumbnails as base64 data URIs |
 | `routes/thumbnail.py` | `GET /thumbnail?url=` — proxies thumbnail from CDN through the API, cached in db 3 (24 h TTL), excluded from auth middleware |
@@ -201,10 +201,12 @@ When set, all HTTPS clients (requests for thumbnails, boto3/S3, yt-dlp, ytmusica
 
 ### S3 Library Index
 
-The `available_albums` table is kept in sync with the S3 bucket:
+The `available_albums` table is kept in sync with the backend library. The
+index source is selected via `INDEX_SOURCE` (`s3` default, `navidrome`, or
+`both`):
 
 - **Recording** — download tasks (`tasks/download.py`) upsert every successfully downloaded album/playlist with its exact YT Music `browse_id`.
-- **Periodic scan** — `api/scheduler.py` runs inside the API pod and dispatches `tasks.index_albums` every `INDEX_INTERVAL_MINUTES` (default 30, min 1). The task scans the S3 bucket (`{artist}/{album}/` prefixes), upserts found items, and prunes entries no longer present. A Valkey lock (db 4) deduplicates dispatch across multiple API replicas — no Celery beat container is needed.
+- **Periodic scan** — `api/scheduler.py` runs inside the API pod and dispatches `tasks.index_albums` (S3) and/or `tasks.index_navidrome` (Navidrome) every `INDEX_INTERVAL_MINUTES` (default 30, min 1). The S3 task scans the bucket (`{artist}/{album}/` prefixes); the Navidrome task queries the server's Subsonic API (`getAlbumList2`, via `zimmporter/navidrome.py`) for the albums it has indexed. Both upsert found items and prune entries no longer present. A Valkey lock (db 4) deduplicates dispatch across multiple API replicas — no Celery beat container is needed.
 - **Search enrichment** — `GET /search` matches each result against the index by `browse_id` (or normalized artist+title) after the cache read, so results stay fresh.
 
 ### Cookies (YouTube auth)
@@ -243,7 +245,11 @@ Both auth methods can be enabled independently; providing valid credentials for 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the periodic S3 library index scan (min `1`) |
+| `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the periodic library index scan (min `1`) |
+| `INDEX_SOURCE` | `s3` | Which library sources feed the `available_albums` index: `s3`, `navidrome`, or `both` |
+| `NAVIDROME_URL` | *(none)* | Base URL of the Navidrome server (worker-side; required when `INDEX_SOURCE` uses navidrome) |
+| `NAVIDROME_USER` | *(none)* | Subsonic API username for Navidrome (worker-side) |
+| `NAVIDROME_PASS` | *(none)* | Subsonic API password for Navidrome (worker-side) |
 | `COOKIE_DIR` | `/var/zimmporter/cookies` | Directory holding the shared yt-dlp cookies file (written by `POST /cookies`) |
 | `YTDLP_COOKIEFILE` | *(none)* | Worker-side path to the cookies file used by yt-dlp |
 | `POT_PROVIDER_URL` | *(none)* | HTTP URL of a BgUtils yt-dlp POT provider (unset disables PO-token extraction) |

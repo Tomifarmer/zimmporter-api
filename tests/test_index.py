@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from db.engine import get_session
 from db.models import AvailableAlbum
-from tasks.index import _run_index, _scan_bucket, upsert_available_album
+from tasks.index import _run_index, _run_navidrome_index, _scan_bucket, upsert_available_album
 
 
 class TestUpsertAvailableAlbum:
@@ -113,3 +113,33 @@ class TestIndexAlbums:
 
         assert result["indexed"] == 0
         scan.assert_not_called()
+
+
+class TestNavidromeIndex:
+    def test_upserts_and_prunes(self, sqlite_db, mocker):
+        mocker.patch(
+            "zimmporter.navidrome.get_albums",
+            return_value=[("Artist One", "Album One", 12), ("Artist Two", "Album Two", 5)],
+        )
+
+        with get_session() as session:
+            session.add(AvailableAlbum(artist="Ghost Artist", album="Ghost Album", browse_id="MPREb_ghost"))
+            session.commit()
+
+        result = _run_navidrome_index()
+
+        assert result["indexed"] == 2
+        assert result["pruned"] == 1
+        with get_session() as session:
+            rows = session.query(AvailableAlbum).all()
+            assert {(r.artist, r.album) for r in rows} == {("Artist One", "Album One"), ("Artist Two", "Album Two")}
+
+    def test_preserves_browse_id_across_scans(self, sqlite_db, mocker):
+        mocker.patch("zimmporter.navidrome.get_albums", return_value=[("Artist One", "Album One", 12)])
+
+        upsert_available_album("Artist One", "Album One", browse_id="MPREb_keep")
+        _run_navidrome_index()
+
+        with get_session() as session:
+            row = session.query(AvailableAlbum).filter_by(artist="Artist One", album="Album One").first()
+            assert row.browse_id == "MPREb_keep"
