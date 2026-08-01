@@ -55,7 +55,9 @@ def get_albums() -> list[tuple[str, str, int]]:
     """Fetch all albums known to Navidrome.
 
     Returns:
-        List of ``(artist, album, track_count)`` tuples.
+        List of ``(artist, album, track_count)`` tuples.  An empty list is
+        returned both for an empty library and for any failure; check the logs
+        for the specific error (see :func:`_fetch_page`).
     """
     import requests
 
@@ -70,6 +72,7 @@ def get_albums() -> list[tuple[str, str, int]]:
         return []
 
     user, password = credentials
+    logger.info("Navidrome library scan starting (url=%s, user=%s)", base_url.rstrip("/"), user)
     found: list[tuple[str, str, int]] = []
 
     offset = 0
@@ -124,10 +127,40 @@ def _fetch_page(
             timeout=_TIMEOUT,
             verify=get_ca_cert(),
         )
-        resp.raise_for_status()
-        payload = resp.json()
     except Exception as exc:
-        logger.error("Navidrome getAlbumList2 failed (offset=%d): %s", offset, exc)
+        logger.error(
+            "Navidrome getAlbumList2 request failed (url=%s, offset=%d): %s. "
+            "Check NAVIDROME_URL reachability/DNS from the worker.",
+            url,
+            offset,
+            exc,
+        )
+        return []
+
+    if resp.status_code in (401, 403):
+        logger.error(
+            "Navidrome getAlbumList2 authentication failed (HTTP %d) for user %r at %s. "
+            "Check NAVIDROME_USER/NAVIDROME_PASS; if Navidrome uses external auth "
+            "(OIDC/Authelia), the Subsonic password may be disabled.",
+            resp.status_code,
+            user,
+            base_url.rstrip("/"),
+        )
+        return []
+    if not resp.ok:
+        logger.error(
+            "Navidrome getAlbumList2 returned HTTP %d (url=%s, offset=%d): %s",
+            resp.status_code,
+            url,
+            offset,
+            resp.text[:300],
+        )
+        return []
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        logger.error("Navidrome getAlbumList2 returned invalid JSON (url=%s): %s", url, exc)
         return []
 
     subsonic = payload.get("subsonic-response") or {}
@@ -143,3 +176,80 @@ def _fetch_page(
         if artist and title:
             page.append((artist, title, int(album.get("songCount") or 0)))
     return page
+
+
+def test_connection() -> None:
+    """Print a connectivity/auth diagnostic against the configured Navidrome.
+
+    Run inside the worker container:
+
+        python -m zimmporter.navidrome
+
+    Reports URL, user, HTTP status, the Subsonic status, and the number of
+    albums the first page would return.
+    """
+    import requests
+
+    base_url = os.getenv("NAVIDROME_URL")
+    if not base_url:
+        print("NAVIDROME_URL is not set")
+        return
+    credentials = _subsonic_credentials()
+    if credentials is None:
+        print("NAVIDROME_USER/NAVIDROME_PASS are not set")
+        return
+
+    user, password = credentials
+    print(f"URL:   {base_url.rstrip('/')}")
+    print(f"User:  {user}")
+
+    params = {
+        "u": user,
+        "p": password,
+        "v": _SUBSONIC_VERSION,
+        "c": _CLIENT_NAME,
+        "f": "json",
+        "type": "alphabeticalByArtist",
+        "size": 1,
+        "offset": 0,
+    }
+    url = f"{base_url.rstrip('/')}/rest/getAlbumList2"
+    try:
+        resp = requests.get(
+            url,
+            params=urllib.parse.urlencode(params),
+            timeout=_TIMEOUT,
+            verify=get_ca_cert(),
+        )
+    except Exception as exc:
+        print(f"REQUEST FAILED: {exc!r}")
+        print("-> Navidrome is unreachable from this container. Check DNS/network/URL.")
+        return
+
+    print(f"HTTP status: {resp.status_code}")
+    if resp.status_code in (401, 403):
+        print("-> Authentication failed. Check NAVIDROME_USER/NAVIDROME_PASS.")
+        return
+    if not resp.ok:
+        print(f"Body: {resp.text[:300]}")
+        return
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        print(f"Invalid JSON: {resp.text[:300]}")
+        return
+
+    subsonic = payload.get("subsonic-response") or {}
+    print(f"Subsonic status: {subsonic.get('status')}")
+    if subsonic.get("status") != "ok":
+        print(f"Subsonic error: {subsonic.get('error')}")
+        return
+    albums = (subsonic.get("albumList2") or {}).get("album", [])
+    print(f"Albums on first page: {len(albums)}")
+    print("-> OK. The Navidrome index source should work.")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    test_connection()

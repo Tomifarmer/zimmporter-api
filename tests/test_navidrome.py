@@ -45,6 +45,42 @@ class TestFetchPage:
 
         assert page == []
 
+    def test_returns_empty_on_unauthorized(self):
+        mock_requests = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 401
+        resp.ok = False
+        resp.text = ""
+        mock_requests.get.return_value = resp
+
+        page = _fetch_page(mock_requests, "http://navidrome:4533", "user", "pass", 0)
+
+        assert page == []
+
+    def test_returns_empty_on_http_error(self):
+        mock_requests = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.ok = False
+        resp.text = "boom"
+        mock_requests.get.return_value = resp
+
+        page = _fetch_page(mock_requests, "http://navidrome:4533", "user", "pass", 0)
+
+        assert page == []
+
+    def test_returns_empty_on_invalid_json(self):
+        mock_requests = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.ok = True
+        resp.json.side_effect = ValueError("bad json")
+        mock_requests.get.return_value = resp
+
+        page = _fetch_page(mock_requests, "http://navidrome:4533", "user", "pass", 0)
+
+        assert page == []
+
     def test_returns_empty_on_api_error(self):
         mock = _mock_requests([_response(status="failed")])
         mock.get.return_value.json.return_value = {
