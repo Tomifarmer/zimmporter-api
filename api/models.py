@@ -31,6 +31,27 @@ class DownloadRequest(BaseModel):
     concurrent: int = Field(default=4, ge=1, le=32, description="Number of concurrent download workers")
 
 
+class CookieStatus(BaseModel):
+    """Response body for the cookie management endpoints.
+
+    Contains only metadata — never cookie values — since the underlying
+    file holds full YouTube session tokens.
+
+    Attributes:
+        exists: Whether a cookies file is currently configured.
+        size: File size in bytes (0 when absent).
+        cookie_count: Number of parsed cookies (0 when absent).
+        domains: Sorted list of unique cookie domains present in the file.
+        modified_at: UTC timestamp of the last upload (None when absent).
+    """
+
+    exists: bool
+    size: int = 0
+    cookie_count: int = 0
+    domains: list[str] = []
+    modified_at: dt.datetime | None = None
+
+
 class JobResponse(BaseModel):
     """Response body for POST download endpoints.
 

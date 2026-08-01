@@ -134,4 +134,6 @@ def proxy_thumbnail(
         except Exception:
             logger.warning("Failed to cache thumbnail %s", url)
 
-    return Response(content=data, media_type=content_type, headers={"X-Cache": "MISS", "Cache-Control": "public, max-age=86400"})
+    return Response(
+        content=data, media_type=content_type, headers={"X-Cache": "MISS", "Cache-Control": "public, max-age=86400"}
+    )

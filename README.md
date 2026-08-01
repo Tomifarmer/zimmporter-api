@@ -19,6 +19,8 @@ Then open the Swagger UI at http://localhost:8000/docs or try the API directly.
 - **`POST /download/playlist`** — Queue one or more playlists. Same flow as album download.
 - **`GET /jobs/<id>`** — Poll a specific job for per-song progress.
 - **`GET /jobs?limit=50&offset=0`** — List recent jobs newest-first, paginated.
+- **`GET /cookies`** — Cookie file metadata (exists, size, cookie count, domains, last updated). Never returns cookie contents.
+- **`POST /cookies`** — Upload a Netscape-format cookies file (multipart `file` field) to enable age-restricted downloads. Validates the format and requires at least one YouTube cookie.
 - **`GET /health`** — Health check (always returns 200; status is `"ok"` or `"degraded"`). No auth required.
 
 ### Search Example
@@ -130,10 +132,28 @@ Key variables:
 | SSL | `CA_CERT`, `REQUESTS_CA_BUNDLE` | unset | Path to private CA PEM file for HTTPS clients |
 | YouTube | `POT_PROVIDER_URL` | unset | BgUtils POT provider HTTP server URL (yt-dlp PO tokens to bypass bot checks) |
 | YouTube | `YTDLP_COOKIEFILE` | unset | Path to a Netscape cookies file from an age-confirmed YouTube account (enables age-restricted downloads) |
+| Cookies | `COOKIE_DIR` | `/var/zimmporter/cookies` | Directory the API writes uploaded cookie files into (shared Docker volume with the worker) |
+
+### YouTube cookies upload
+
+Export your YouTube cookies in Netscape format (e.g. with the "Get cookies.txt LOCALLY" browser
+extension) and either upload them through the **Settings** page in the frontend or via:
+
+```bash
+curl -X POST "http://localhost:8000/cookies" \
+  -H "X-API-Key: your-secret" \
+  -F "file=@cookies.txt"
+```
+
+The API validates the file (must parse as Netscape format and contain at least one `youtube.com`
+cookie) and writes it atomically into `COOKIE_DIR`. The worker reads the same file through the
+shared `cookies_data` volume and re-applies it at the start of every download job, so a newly
+uploaded file takes effect without restarting the worker. Cookie contents are never exposed by the
+API — only metadata. To disable cookie-based auth, delete the uploaded file from the volume.
 
 ## Testing
 
-88 pytest tests across all modules (core, API routes, auth, postprocessors, health, cert). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
+128 pytest tests across all modules (core, API routes, auth, postprocessors, health, cert, cookies). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
 
 ```bash
 # Run full suite
@@ -157,6 +177,7 @@ uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
 | `test_postprocessors.py` | 7 | EnrichMeta, UploadToS3 |
 | `test_routes_search.py` | 8 | GET /search, caching, validation |
 | `test_routes_download.py` | 11 | POST /download, Celery task dispatch |
+| `test_routes_cookies.py` | 10 | GET/POST /cookies, upload validation |
 | `test_routes_jobs.py` | 13 | GET /jobs, retry logic |
 
 The DB layer is replaced with SQLite `:memory:` per test via the `sqlite_db` fixture in `tests/conftest.py`.

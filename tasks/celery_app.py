@@ -39,6 +39,7 @@ def _warmup_ytdlp_plugins(**kwargs) -> None:
 
     load_all_plugins()
 
+
 broker_url = os.environ.get("CELERY_BROKER", "redis://localhost:6379/0")
 backend_url = os.environ.get("CELERY_BACKEND", "redis://localhost:6379/1")
 

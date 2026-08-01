@@ -65,7 +65,6 @@ class TestSearchRoute:
     def test_search_embeds_thumbnail_data_uri_when_proxy_enabled(self, test_client, mocker):
         import os
 
-        from api.routes.search import _fetch_thumbnail_bytes
         from zimmporter.core import Zimmporter
 
         mocker.patch.dict(os.environ, {"API_PROXY_FETCH": "true"})
@@ -101,7 +100,6 @@ class TestSearchRoute:
     def test_search_embeds_thumbnail_data_uri_for_youtube_url(self, test_client, mocker):
         import os
 
-        from api.routes.search import _fetch_thumbnail_bytes
         from zimmporter.core import Zimmporter
 
         mocker.patch.dict(os.environ, {"API_PROXY_FETCH": "true"})

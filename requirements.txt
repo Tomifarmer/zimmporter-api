@@ -1,4 +1,5 @@
 -r requirements-base.txt
 fastapi>=0.110,<1.0
 pydantic>=2.0,<3.0
+python-multipart>=0.0.9
 uvicorn[standard]>=0.29,<1.0

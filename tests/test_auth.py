@@ -1,6 +1,3 @@
-import pytest
-
-
 class TestAuthDisabled:
     """When neither USE_SIMPLE_AUTH nor USE_SOCIAL_LOGIN is set, all requests pass."""
 

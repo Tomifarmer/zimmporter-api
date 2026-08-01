@@ -13,13 +13,6 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
-logger = logging.getLogger("zimmporter.auth")
-if not logger.handlers:
-    _handler = logging.StreamHandler()
-    _handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
-    logger.addHandler(_handler)
-    logger.setLevel(logging.INFO)
-
 import jwt
 import redis
 import requests
@@ -31,6 +24,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from api.routes.cookies import cookies_router
 from api.routes.download import download_router
 from api.routes.jobs import jobs_router
 from api.routes.search import search_router
@@ -40,6 +34,13 @@ from db.models import Song
 from tasks.celery_app import celery_app
 from zimmporter import __version__
 from zimmporter.cert import configure_ssl
+
+logger = logging.getLogger("zimmporter.auth")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
 
 
 @asynccontextmanager
@@ -54,6 +55,7 @@ app.include_router(search_router)
 app.include_router(download_router)
 app.include_router(jobs_router)
 app.include_router(thumbnail_router)
+app.include_router(cookies_router)
 
 
 # ── JWKS cache ──────────────────────────────────────────────────────────────
@@ -348,11 +350,7 @@ def _fail_stalled_jobs() -> None:
         with get_session() as session:
             from db.models import Job
 
-            stalled = (
-                session.query(Job)
-                .filter(Job.status.in_(["pending", "running"]), Job.updated_at < cutoff)
-                .all()
-            )
+            stalled = session.query(Job).filter(Job.status.in_(["pending", "running"]), Job.updated_at < cutoff).all()
             for job in stalled:
                 job.status = "failed"
                 job.error = "Job stalled — worker likely crashed"

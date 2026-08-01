@@ -7,7 +7,7 @@ RUN apt update && apt upgrade --no-install-recommends -y && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd -r zimmporter -g 51000 && \
     useradd -r -g zimmporter -u 51000 -d /zimmer zimmporter && \
-    mkdir -p /etc/ssl/certs /data/zimmer/importer
+    mkdir -p /etc/ssl/certs /data/zimmer/importer /var/zimmporter/cookies
 
 WORKDIR /zimmer/
 
@@ -19,7 +19,7 @@ COPY api/ ./api/
 COPY tasks/ ./tasks/
 COPY db/ ./db/
 
-RUN chown -R 51000:51000 /zimmer /data/zimmer
+RUN chown -R 51000:51000 /zimmer /data/zimmer /var/zimmporter
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 

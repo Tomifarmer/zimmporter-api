@@ -10,7 +10,6 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import quote
 
 import requests
 from fastapi import APIRouter, Query
@@ -125,7 +124,9 @@ def _fetch_thumbnail_bytes(url: str) -> tuple[bytes, str] | None:
 def search(
     request: Request,
     q: str = Query(..., description="Search query"),
-    type: str = Query("albums", description="Result type: ``albums``, ``featured_playlists``, or ``community_playlists``"),
+    type: str = Query(
+        "albums", description="Result type: ``albums``, ``featured_playlists``, or ``community_playlists``"
+    ),
     limit: int = Query(10, ge=1, le=50, description="Number of results (1-50)"),
 ) -> SearchResponse:
     """Search YouTube Music for albums or playlists.
