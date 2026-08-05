@@ -55,6 +55,29 @@ class CookieStatus(BaseModel):
     is_stale: bool = False
 
 
+class JobStatsResponse(BaseModel):
+    """Aggregate job counts across all records (not just the current page).
+
+    Returned by ``GET /jobs/stats`` so the frontend can render global
+    status counts regardless of the paginated ``GET /jobs`` list.
+
+    Attributes:
+        total: Total number of jobs.
+        pending: Jobs with status ``pending``.
+        running: Jobs with status ``running`` or ``pending``.
+        success: Jobs with status ``success`` and no failed songs.
+        failed: Jobs with status ``failed``.
+        partial: Jobs having at least one failed song.
+    """
+
+    total: int
+    pending: int
+    running: int
+    success: int
+    failed: int
+    partial: int
+
+
 class JobResponse(BaseModel):
     """Response body for POST download endpoints.
 

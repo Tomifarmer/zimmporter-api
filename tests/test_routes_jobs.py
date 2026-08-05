@@ -153,6 +153,75 @@ class TestListJobsFiltered:
         assert len(data) == 2
 
 
+class TestJobStats:
+    def test_stats_return_zeros_when_empty(self, test_client):
+        resp = test_client.get("/jobs/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {
+            "total": 0,
+            "pending": 0,
+            "running": 0,
+            "success": 0,
+            "failed": 0,
+            "partial": 0,
+        }
+
+    def test_stats_counts_job_statuses(self, test_client):
+        with get_session() as session:
+            _create_job(session, status="pending")
+            _create_job(session, status="running")
+            _create_job(session, status="success")
+            _create_job(session, status="failed")
+
+        resp = test_client.get("/jobs/stats")
+        data = resp.json()
+        assert data["total"] == 4
+        assert data["pending"] == 1
+        assert data["running"] == 2
+        assert data["success"] == 1
+        assert data["failed"] == 1
+        assert data["partial"] == 0
+
+    def test_stats_counts_partial_jobs(self, test_client):
+        with get_session() as session:
+            success_job = _create_job(session, status="success")
+            _create_song(session, success_job.id, status="success")
+            _create_song(session, success_job.id, status="failed")
+            failed_job = _create_job(session, status="failed")
+            _create_song(session, failed_job.id, status="failed")
+            clean_job = _create_job(session, status="success")
+            _create_song(session, clean_job.id, status="success")
+
+        resp = test_client.get("/jobs/stats")
+        data = resp.json()
+        assert data["total"] == 3
+        assert data["success"] == 1
+        assert data["failed"] == 1
+        assert data["partial"] == 2
+
+    def test_stats_respects_authenticated_user(self, test_client, monkeypatch, mocker):
+        monkeypatch.setenv("GITHUB_CLIENT_ID", "my-client")
+        mocker.patch(
+            "api.app._validate_github_token",
+            return_value={"sub": "octocat", "name": "Octocat", "provider": "github"},
+        )
+
+        with get_session() as session:
+            _create_job(session, status="success", requested_by="Octocat")
+            _create_job(session, status="failed", requested_by="Octocat")
+            _create_job(session, status="success", requested_by="someone-else")
+
+        resp = test_client.get(
+            "/jobs/stats",
+            headers={"Authorization": "Bearer ghs_octocat_token"},
+        )
+        data = resp.json()
+        assert data["total"] == 2
+        assert data["success"] == 1
+        assert data["failed"] == 1
+
+
 class TestRetryJob:
     def test_retry_resets_failed_songs(self, test_client, mock_celery_tasks):
         mock_album_task, _ = mock_celery_tasks

@@ -6,8 +6,9 @@ pagination via ``limit`` and ``offset`` query parameters.
 """
 
 from fastapi import APIRouter, HTTPException, Request
+from sqlalchemy import func
 
-from api.models import JobResponse, JobStatusResponse
+from api.models import JobResponse, JobStatsResponse, JobStatusResponse
 from db.engine import get_session
 from db.models import Job, Song
 from tasks.download import download_album, download_playlist
@@ -65,6 +66,61 @@ def _build_response(job: Job, songs: list) -> dict:
             for s in songs
         ],
     }
+
+
+@jobs_router.get("/stats", response_model=JobStatsResponse)
+def get_job_stats(request: Request) -> JobStatsResponse:
+    """Return aggregate job status counts across all records.
+
+    Computes counts over every job (respecting the authenticated user
+    filter) rather than a single page, so the frontend can display
+    accurate global status totals next to the paginated job list.
+
+    Args:
+        request: FastAPI request (used to extract the authenticated user).
+
+    Returns:
+        :class:`JobStatsResponse` with global counts.
+    """
+    requested_by = _get_requested_by(request)
+
+    with get_session() as session:
+        job_query = session.query(Job)
+        if requested_by:
+            job_query = job_query.filter(Job.requested_by == requested_by)
+
+        status_counts = dict(
+            job_query.with_entities(Job.status, func.count()).group_by(Job.status).all()
+        )
+
+        song_query = session.query(Song).filter(Song.status == "failed")
+        if requested_by:
+            song_query = song_query.join(Job, Job.id == Song.job_id).filter(
+                Job.requested_by == requested_by
+            )
+        partial_ids = {job_id for (job_id,) in song_query.with_entities(Song.job_id).distinct().all()}
+
+        success_partial_query = session.query(Song.job_id).filter(Song.status == "failed").join(
+            Job, Job.id == Song.job_id
+        ).filter(Job.status == "success")
+        if requested_by:
+            success_partial_query = success_partial_query.filter(Job.requested_by == requested_by)
+        success_partial = success_partial_query.distinct().count()
+
+    total = sum(status_counts.values())
+    pending = status_counts.get("pending", 0)
+    running = status_counts.get("running", 0) + pending
+    failed = status_counts.get("failed", 0)
+    success = status_counts.get("success", 0) - success_partial
+
+    return JobStatsResponse(
+        total=total,
+        pending=pending,
+        running=running,
+        success=success,
+        failed=failed,
+        partial=len(partial_ids),
+    )
 
 
 @jobs_router.get("/{job_id}", response_model=JobStatusResponse)
