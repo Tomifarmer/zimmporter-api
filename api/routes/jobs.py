@@ -149,7 +149,12 @@ def get_job_status(job_id: int) -> JobStatusResponse:
 
 
 @jobs_router.get("", response_model=list[JobStatusResponse])
-def list_jobs(request: Request, limit: int = 50, offset: int = 0) -> list[JobStatusResponse]:
+def list_jobs(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    status: str = "all",
+) -> list[JobStatusResponse]:
     """List recent jobs with embedded song statuses.
 
     When the request is authenticated via OIDC Bearer token, only jobs
@@ -158,10 +163,17 @@ def list_jobs(request: Request, limit: int = 50, offset: int = 0) -> list[JobSta
 
     Jobs are returned newest-first (ordered by ``created_at`` descending).
 
+    The ``status`` parameter filters jobs before pagination so the
+    frontend can page through a single status.  ``success`` excludes
+    partial successes (jobs whose status is ``success`` but that have at
+    least one failed song); those are returned by ``partial`` instead.
+
     Args:
         request: FastAPI request (used to extract the authenticated user).
         limit: Maximum number of jobs (default 50).
         offset: Number of jobs to skip (default 0).
+        status: Job status filter: ``all``, ``pending``, ``running``,
+            ``success``, ``failed``, or ``partial`` (default ``all``).
 
     Returns:
         List of :class:`JobStatusResponse` objects.
@@ -172,7 +184,31 @@ def list_jobs(request: Request, limit: int = 50, offset: int = 0) -> list[JobSta
         query = session.query(Job)
         if requested_by:
             query = query.filter(Job.requested_by == requested_by)
-        jobs = query.order_by(Job.created_at.desc()).offset(offset).limit(limit).all()
+
+        if status in ("success", "partial"):
+            partial_ids = (
+                session.query(Song.job_id)
+                .filter(Song.status == "failed")
+                .distinct()
+                .scalar_subquery()
+            )
+            if status == "success":
+                query = query.filter(Job.status == "success").filter(~Job.id.in_(partial_ids))
+            else:
+                query = query.filter(Job.id.in_(partial_ids))
+        elif status == "failed":
+            query = query.filter(Job.status == "failed")
+        elif status == "pending":
+            query = query.filter(Job.status == "pending")
+        elif status == "running":
+            query = query.filter(Job.status == "running")
+
+        jobs = (
+            query.order_by(Job.created_at.desc(), Job.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
         results = []
         for job in jobs:
             songs = session.query(Song).filter(Song.job_id == job.id).order_by(Song.id.asc()).all()

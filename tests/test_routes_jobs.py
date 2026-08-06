@@ -153,6 +153,86 @@ class TestListJobsFiltered:
         assert len(data) == 2
 
 
+class TestListJobsByStatus:
+    """Tests verifying that the ``status`` query parameter filters before pagination."""
+
+    def test_status_all_returns_every_job(self, test_client):
+        with get_session() as session:
+            _create_job(session, browse_id="p", status="pending")
+            _create_job(session, browse_id="r", status="running")
+            _create_job(session, browse_id="s", status="success")
+
+        resp = test_client.get("/jobs?status=all")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 3
+
+    def test_status_pending_returns_only_pending(self, test_client):
+        with get_session() as session:
+            _create_job(session, browse_id="p", status="pending")
+            _create_job(session, browse_id="r", status="running")
+
+        resp = test_client.get("/jobs?status=pending")
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["browse_id"] == "p"
+
+    def test_status_running_returns_only_running(self, test_client):
+        with get_session() as session:
+            _create_job(session, browse_id="p", status="pending")
+            _create_job(session, browse_id="r", status="running")
+
+        resp = test_client.get("/jobs?status=running")
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["browse_id"] == "r"
+
+    def test_status_failed_returns_only_failed(self, test_client):
+        with get_session() as session:
+            _create_job(session, browse_id="s", status="success")
+            _create_job(session, browse_id="f", status="failed")
+
+        resp = test_client.get("/jobs?status=failed")
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["browse_id"] == "f"
+
+    def test_status_success_excludes_partial_jobs(self, test_client):
+        with get_session() as session:
+            clean = _create_job(session, browse_id="clean", status="success")
+            _create_song(session, clean.id, status="success")
+            partial = _create_job(session, browse_id="partial", status="success")
+            _create_song(session, partial.id, status="success")
+            _create_song(session, partial.id, status="failed")
+
+        resp = test_client.get("/jobs?status=success")
+        data = resp.json()
+        assert [j["browse_id"] for j in data] == ["clean"]
+
+    def test_status_partial_returns_jobs_with_failed_songs(self, test_client):
+        with get_session() as session:
+            failed = _create_job(session, browse_id="failed", status="failed")
+            _create_song(session, failed.id, status="failed")
+            partial = _create_job(session, browse_id="partial", status="success")
+            _create_song(session, partial.id, status="failed")
+            clean = _create_job(session, browse_id="clean", status="success")
+            _create_song(session, clean.id, status="success")
+
+        resp = test_client.get("/jobs?status=partial")
+        data = resp.json()
+        assert {j["browse_id"] for j in data} == {"failed", "partial"}
+
+    def test_status_filter_applies_before_pagination(self, test_client):
+        with get_session() as session:
+            for i in range(5):
+                _create_job(session, browse_id=f"p{i}", status="pending")
+                _create_job(session, browse_id=f"r{i}", status="running")
+
+        resp = test_client.get("/jobs?status=pending&limit=3&offset=3")
+        data = resp.json()
+        assert len(data) == 2
+        assert all(j["browse_id"].startswith("p") for j in data)
+
+
 class TestJobStats:
     def test_stats_return_zeros_when_empty(self, test_client):
         resp = test_client.get("/jobs/stats")
