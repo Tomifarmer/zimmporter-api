@@ -2,9 +2,9 @@
 
 Allows an authenticated user to upload the Netscape-format yt-dlp cookies
 file (exported from a browser extension) through the UI instead of
-scp'ing it to the host.  The file is written atomically into
-:data:`COOKIE_DIR` — a shared Docker volume the worker mounts read-only —
-so running workers pick it up on their next download job.
+scp'ing it to the host.  The content is validated and stored in Valkey
+via :mod:`zimmporter.cookie_store` — no shared file volume is needed, so
+running Celery workers pick it up on their next download job.
 
 Only metadata is ever returned; the cookie contents (full session tokens)
 are never exposed through the API.
@@ -12,21 +12,13 @@ are never exposed through the API.
 
 import datetime
 import http.cookiejar
-import os
 import tempfile
-from contextlib import suppress
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from api.models import CookieStatus
-from zimmporter import cookie_health
-
-#: Directory the API writes cookies into (shared volume with the worker).
-COOKIE_DIR = os.environ.get("COOKIE_DIR", "/var/zimmporter/cookies")
-
-#: Cookie file name inside :data:`COOKIE_DIR`.
-COOKIE_FILENAME = "cookies.txt"
+from zimmporter import cookie_health, cookie_store
 
 #: Maximum accepted cookies file size (2 MB).
 _MAX_COOKIE_SIZE = 2 * 1024 * 1024
@@ -43,11 +35,6 @@ _SESSION_COOKIE_NAMES = {
 }
 
 cookies_router = APIRouter(prefix="/cookies", tags=["cookies"])
-
-
-def _cookie_path() -> str:
-    """Absolute path to the cookie file inside :data:`COOKIE_DIR`."""
-    return os.path.join(COOKIE_DIR, COOKIE_FILENAME)
 
 
 def _parse_cookies(content: bytes) -> list[dict]:
@@ -97,17 +84,11 @@ def _cookies_expired(cookies: list[dict]) -> bool:
 def get_cookies() -> CookieStatus:
     """Return metadata about the currently configured cookies file.
 
-    Returns ``exists: false`` when no file is present or it cannot be read
-    or parsed.  Never returns the file contents.
+    Returns ``exists: false`` when nothing has been uploaded or the stored
+    content cannot be read or parsed.  Never returns the contents.
     """
-    path = _cookie_path()
-    if not os.path.isfile(path):
-        return CookieStatus(exists=False)
-    try:
-        with open(path, "rb") as f:
-            content = f.read()
-        modified_at = datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.UTC)
-    except OSError:
+    content = cookie_store.get_content()
+    if content is None:
         return CookieStatus(exists=False)
     try:
         cookies = _parse_cookies(content)
@@ -118,7 +99,7 @@ def get_cookies() -> CookieStatus:
         size=len(content),
         cookie_count=len(cookies),
         domains=sorted({cookie["domain"] for cookie in cookies}),
-        modified_at=modified_at,
+        modified_at=cookie_store.get_modified_at(),
         is_stale=cookie_health.is_stale() or _cookies_expired(cookies),
     )
 
@@ -127,10 +108,11 @@ def get_cookies() -> CookieStatus:
 def upload_cookies(
     file: Annotated[UploadFile, File(description="Netscape-format cookies.txt")],
 ) -> CookieStatus:
-    """Upload a new cookies file, atomically replacing the current one.
+    """Upload a new cookies file, storing it in Valkey.
 
     Validates that the file parses as a Netscape cookie file and contains
-    at least one YouTube cookie before replacing the stored file.
+    at least one YouTube cookie before storing it.  Replaces any previous
+    content and clears the staleness flag.
 
     Args:
         file: Multipart upload of the exported cookies file.
@@ -145,18 +127,8 @@ def upload_cookies(
     if not any(cookie["domain"].endswith("youtube.com") for cookie in cookies):
         raise HTTPException(status_code=400, detail="No YouTube cookies found in file")
 
-    os.makedirs(COOKIE_DIR, exist_ok=True)
-    dest = _cookie_path()
-    tmp_path = f"{dest}.tmp"
-    try:
-        with open(tmp_path, "wb") as f:
-            f.write(content)
-        os.replace(tmp_path, dest)
-    finally:
-        if os.path.exists(tmp_path):
-            with suppress(OSError):
-                os.remove(tmp_path)
-
+    modified_at = datetime.datetime.now(datetime.UTC)
+    cookie_store.set_content(content, modified_at)
     cookie_health.clear_stale()
 
     return CookieStatus(
@@ -164,5 +136,5 @@ def upload_cookies(
         size=len(content),
         cookie_count=len(cookies),
         domains=sorted({cookie["domain"] for cookie in cookies}),
-        modified_at=datetime.datetime.now(datetime.UTC),
+        modified_at=modified_at,
     )

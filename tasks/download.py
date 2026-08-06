@@ -36,7 +36,7 @@ from db.models import Job, Song
 from tasks.celery_app import celery_app
 from tasks.index import upsert_available_album
 from zimmporter.cert import get_ca_cert
-from zimmporter.core import YTDL_OPTS, YTDLP_COOKIEFILE, Zimmporter, apply_cookie_config, temp_dir
+from zimmporter.core import YTDL_OPTS, Zimmporter, apply_cookie_config, temp_dir
 from zimmporter.ytdlp_logger import YTDLPLogger
 
 logger = logging.getLogger(__name__)
@@ -45,14 +45,14 @@ BATCH_SIZE = 2
 
 
 def _refresh_cookie_config() -> None:
-    """Re-apply the yt-dlp cookiefile from the current source.
+    """Re-apply the yt-dlp cookiefile from the Valkey cookie store.
 
-    ``core.apply_cookie_config`` copies the source file into the yt-dlp
-    cache directory each call, so running workers pick up a freshly
+    ``core.apply_cookie_config`` writes the current store content into the
+    yt-dlp cache directory each call, so running workers pick up a freshly
     uploaded cookies file without a restart.  ``YTDL_OPTS`` is a module
     global mutated in place and inherited by forked pool children.
     """
-    apply_cookie_config(YTDL_OPTS, YTDLP_COOKIEFILE)
+    apply_cookie_config(YTDL_OPTS)
 
 
 # Song update batching threshold — commit every BATCH_SIZE song updates per session

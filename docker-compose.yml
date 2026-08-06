@@ -47,14 +47,12 @@ services:
       - DB_USER=root
       - DB_PASS=root
       - DB_NAME=zimmporter
-      - COOKIE_DIR=/var/zimmporter/cookies
       - INDEX_INTERVAL_MINUTES=${INDEX_INTERVAL_MINUTES:-30}
       - INDEX_SOURCE=${INDEX_SOURCE:-s3}
     env_file:
       - .env.local
     volumes:
       - zimmer_data:/data/zimmer/importer
-      - cookies_data:/var/zimmporter/cookies
     depends_on:
       valkey:
         condition: service_healthy
@@ -79,13 +77,11 @@ services:
       - AWS_BUCKET=test
       - AWS_DEFAULT_REGION=us-east-1
       - POT_PROVIDER_URL=http://bgutil-provider:4416
-      - YTDLP_COOKIEFILE=/etc/zimmporter/cookies/cookies.txt
       - NAVIDROME_URL=${NAVIDROME_URL:-}
       - NAVIDROME_USER=${NAVIDROME_USER:-}
       - NAVIDROME_PASS=${NAVIDROME_PASS:-}
     volumes:
       - zimmer_data:/data/zimmer/importer
-      - cookies_data:/etc/zimmporter/cookies:ro
     depends_on:
       bgutil-provider:
         condition: service_started
@@ -99,4 +95,3 @@ volumes:
   valkey_data:
   mariadb_data:
   zimmer_data:
-  cookies_data:

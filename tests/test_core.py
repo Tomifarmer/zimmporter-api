@@ -216,43 +216,33 @@ class TestDownloadPlaylistSong:
 
 
 class TestApplyCookieConfig:
-    def test_cookiefile_added_when_file_exists(self, tmp_path):
-        source = tmp_path / "cookies.txt"
-        source.write_text("# Netscape HTTP Cookie File\n")
+    def test_cookiefile_added_from_store(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("zimmporter.core.get_content", lambda: b"# Netscape HTTP Cookie File\n")
+        monkeypatch.setattr("zimmporter.core.is_stale", lambda: False)
         opts = {"cachedir": str(tmp_path / "cache")}
-        apply_cookie_config(opts, str(source))
+        apply_cookie_config(opts)
         assert opts["cookiefile"] == str(tmp_path / "cache" / "cookies" / "cookies.txt")
         assert os.path.isfile(opts["cookiefile"])
-        assert opts["cookiefile"] != str(source)
 
-    def test_cookiefile_skipped_when_env_unset(self):
-        opts = {}
-        apply_cookie_config(opts, "")
-        assert "cookiefile" not in opts
-
-    def test_cookiefile_skipped_when_file_missing(self):
-        opts = {}
-        apply_cookie_config(opts, "/nonexistent/cookies.txt")
+    def test_cookiefile_skipped_when_store_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("zimmporter.core.get_content", lambda: None)
+        monkeypatch.setattr("zimmporter.core.is_stale", lambda: False)
+        opts = {"cachedir": str(tmp_path / "cache")}
+        apply_cookie_config(opts)
         assert "cookiefile" not in opts
 
     def test_cookiefile_skipped_when_stale(self, tmp_path, monkeypatch):
-        import zimmporter.cookie_health as cookie_health
-
-        monkeypatch.setattr(cookie_health, "is_stale", lambda: True)
-        source = tmp_path / "cookies.txt"
-        source.write_text("# Netscape HTTP Cookie File\n")
+        monkeypatch.setattr("zimmporter.core.get_content", lambda: b"# Netscape HTTP Cookie File\n")
+        monkeypatch.setattr("zimmporter.core.is_stale", lambda: True)
         opts = {"cachedir": str(tmp_path / "cache")}
-        apply_cookie_config(opts, str(source))
+        apply_cookie_config(opts)
         assert "cookiefile" not in opts
 
     def test_cookiefile_removed_when_stale(self, tmp_path, monkeypatch):
-        import zimmporter.cookie_health as cookie_health
-
-        monkeypatch.setattr(cookie_health, "is_stale", lambda: True)
-        source = tmp_path / "cookies.txt"
-        source.write_text("# Netscape HTTP Cookie File\n")
+        monkeypatch.setattr("zimmporter.core.get_content", lambda: b"# Netscape HTTP Cookie File\n")
+        monkeypatch.setattr("zimmporter.core.is_stale", lambda: True)
         opts = {"cachedir": str(tmp_path / "cache"), "cookiefile": "/old/cookies.txt"}
-        apply_cookie_config(opts, str(source))
+        apply_cookie_config(opts)
         assert "cookiefile" not in opts
 
 

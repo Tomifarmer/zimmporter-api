@@ -13,13 +13,13 @@ RUN apk upgrade --no-cache && apk add --upgrade --no-cache expat && \
     rm /usr/local/bin/uv && \
     addgroup -S zimmporter -g 51000 && \
     adduser -S -G zimmporter -u 51000 -h /zimmer zimmporter && \
-    mkdir -p /etc/ssl/certs /data/zimmer/importer /var/zimmporter/cookies
+    mkdir -p /etc/ssl/certs /data/zimmer/importer
 WORKDIR /zimmer/
 COPY zimmporter/ ./zimmporter/
 COPY api/ ./api/
 COPY tasks/ ./tasks/
 COPY db/ ./db/
-RUN chown -R 51000:51000 /zimmer /data/zimmer /var/zimmporter
+RUN chown -R 51000:51000 /zimmer /data/zimmer
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 USER zimmporter
 EXPOSE 8000

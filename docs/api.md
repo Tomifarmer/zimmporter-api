@@ -72,10 +72,11 @@ If the configured file does not exist, a warning is logged and the clients fall 
 
 ### Cookies (YouTube auth)
 
+The cookies file uploaded via `POST /cookies` is stored in **Valkey** (database 3, alongside the staleness flag) — no shared file volume is required. The API writes it on upload; workers read it on each download job and write a local writable copy for yt-dlp.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COOKIE_DIR` | `/var/zimmporter/cookies` | Directory holding the shared yt-dlp cookies file (written by `POST /cookies`) |
-| `YTDLP_COOKIEFILE` | — | Worker-side path to the cookies file used by yt-dlp for age-restricted downloads |
+| *(none)* | — | No environment configuration; content lives in Valkey under `zimmporter:cookies:content` / `zimmporter:cookies:meta` |
 
 ### POT Provider (BgUtils)
 
@@ -290,7 +291,7 @@ Returns metadata about the configured yt-dlp cookies file — never its contents
 POST /cookies
 ```
 
-Multipart upload (field `file`) of a Netscape-format `cookies.txt`. Validates that the file parses and contains at least one `youtube.com` cookie, and is at most 2 MB. The file is written atomically into `COOKIE_DIR`, so workers pick it up without restart.
+Multipart upload (field `file`) of a Netscape-format `cookies.txt`. Validates that the file parses and contains at least one `youtube.com` cookie, and is at most 2 MB. The content is stored in **Valkey** (via the cookie store), so running workers pick it up on their next download job without restart.
 
 While stale, downloads run anonymously (bad cookies are skipped) and `GET /cookies` reports `is_stale: true`. Uploading a fresh file clears the flag.
 

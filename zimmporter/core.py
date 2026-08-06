@@ -21,6 +21,8 @@ import requests
 from ytmusicapi import YTMusic
 
 from zimmporter.cert import get_ca_cert
+from zimmporter.cookie_health import is_stale
+from zimmporter.cookie_store import get_content
 from zimmporter.ytdlp_logger import YTDLPLogger
 
 #: Temporary working directory for intermediate downloads and thumbnails.
@@ -30,11 +32,6 @@ temp_dir = "/data/zimmer/importer/"
 #: When set, yt-dlp is configured to request PO tokens from it via the
 #: ``youtubepot-bgutilhttp`` provider. Empty disables the integration.
 POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "").strip()
-
-#: Path to a Netscape-format cookies file from an age-confirmed YouTube account.
-#: When set and the file exists, yt-dlp authenticates with it, which allows
-#: downloading age-restricted content. Empty disables the integration.
-YTDLP_COOKIEFILE = os.getenv("YTDLP_COOKIEFILE", "").strip()
 
 #: Global yt-dlp options dict.
 #:
@@ -63,55 +60,40 @@ if POT_PROVIDER_URL:
     YTDL_OPTS["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]}}
 
 
-def _cookies_stale() -> bool:
-    """Whether a worker has flagged the current cookies as stale in Valkey."""
-    try:
-        from zimmporter.cookie_health import is_stale
+def apply_cookie_config(opts: dict) -> None:
+    """Add a ``cookiefile`` to yt-dlp opts from the Valkey cookie store.
 
-        return is_stale()
-    except Exception:
-        return False
+    Pulls the uploaded cookies file from Valkey and writes it into the
+    yt-dlp cache directory so yt-dlp works on a writable copy (it may
+    rewrite the file to persist refreshed cookies).  No shared file volume
+    is required — the API and the worker both read the same Valkey store.
 
-
-def apply_cookie_config(opts: dict, cookie_file: str) -> None:
-    """Add a ``cookiefile`` to yt-dlp opts when the file exists.
-
-    yt-dlp may rewrite the cookies file to persist refreshed cookies, so the
-    configured file is copied into the yt-dlp cache directory first.  This
-    keeps the source file read-only (e.g. a read-only Docker mount or a
-    secret) while letting yt-dlp work on a writable copy.
-
-    When the cookies have been flagged stale (rejected by YouTube), the
-    file is skipped entirely so yt-dlp runs anonymously instead of failing
+    When the cookies have been flagged stale (rejected by YouTube), they
+    are skipped entirely so yt-dlp runs anonymously instead of failing
     every download with the bot check.  A fresh upload clears the flag and
     re-enables cookies on the next call.
 
     Args:
         opts: yt-dlp options dict to mutate in place.
-        cookie_file: Path to a Netscape-format cookies file. Empty skips
-            the integration entirely; a missing file only logs a warning.
     """
-    if not cookie_file:
-        return
-    if not os.path.isfile(cookie_file):
-        logging.getLogger("Zimmporter").warning(
-            f"YTDLP_COOKIEFILE path does not exist ({cookie_file}), continuing without cookies."
-        )
-        return
-    if _cookies_stale():
+    if is_stale():
         opts.pop("cookiefile", None)
         logging.getLogger("Zimmporter").warning(
-            "YTDLP_COOKIEFILE present but cookies are flagged stale; continuing without cookies."
+            "Cookies are flagged stale; continuing without cookies."
         )
+        return
+    content = get_content()
+    if not content:
         return
     cookie_dir = os.path.join(opts.get("cachedir", "/tmp/yt-dlp-cache"), "cookies")
     os.makedirs(cookie_dir, exist_ok=True)
     writable_copy = os.path.join(cookie_dir, "cookies.txt")
-    shutil.copyfile(cookie_file, writable_copy)
+    with open(writable_copy, "wb") as f:
+        f.write(content)
     opts["cookiefile"] = writable_copy
 
 
-apply_cookie_config(YTDL_OPTS, YTDLP_COOKIEFILE)
+apply_cookie_config(YTDL_OPTS)
 
 
 # How many times to retry a song if download or conversion fails due to race conditions.

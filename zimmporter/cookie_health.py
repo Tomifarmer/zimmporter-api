@@ -13,7 +13,7 @@ import time
 
 from redis import Redis
 
-from tasks.celery_app import celery_app
+from zimmporter.redis_client import get_redis
 
 logger = logging.getLogger("Zimmporter")
 
@@ -37,7 +37,7 @@ _last_mark = 0.0
 def _redis() -> Redis | None:
     """Return a Valkey client for the cookie-health db (``None`` on failure)."""
     try:
-        return Redis.from_url(celery_app.conf.broker_url, db=_DB)
+        return get_redis(_DB)
     except Exception:
         return None
 
