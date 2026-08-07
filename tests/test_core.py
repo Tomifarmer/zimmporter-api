@@ -187,6 +187,44 @@ class TestDownloadAlbumSong:
         )
         assert result["s3_path"] == "Artist - Name/Album - Name/01 - Song - Title.m4a"
 
+    def test_lyrics_passed_to_enrich_meta(self, mocker):
+        mocker.patch("zimmporter.core._fetch_lyrics", return_value="la la la")
+        mock_ydl = mocker.patch("yt_dlp.YoutubeDL")
+        mock_ydl_context = MagicMock()
+        mock_ydl_instance = MagicMock()
+        mock_ydl_context.__enter__.return_value = mock_ydl_instance
+        mock_ydl.return_value = mock_ydl_context
+
+        Zimmporter.download_album_song(
+            {"title": "Track One", "videoId": "vid1", "trackNumber": 1},
+            {"title": "Album", "year": 2024},
+            "Artist",
+            "/fake/cover.jpg",
+            thread_id=1,
+        )
+
+        enrich = mock_ydl_instance.add_post_processor.call_args_list[0][0][0]
+        assert enrich.metadata["lyrics"] == "la la la"
+
+    def test_skips_lyrics_when_none(self, mocker):
+        mocker.patch("zimmporter.core._fetch_lyrics", return_value=None)
+        mock_ydl = mocker.patch("yt_dlp.YoutubeDL")
+        mock_ydl_context = MagicMock()
+        mock_ydl_instance = MagicMock()
+        mock_ydl_context.__enter__.return_value = mock_ydl_instance
+        mock_ydl.return_value = mock_ydl_context
+
+        Zimmporter.download_album_song(
+            {"title": "Track One", "videoId": "vid1", "trackNumber": 1},
+            {"title": "Album", "year": 2024},
+            "Artist",
+            "/fake/cover.jpg",
+            thread_id=1,
+        )
+
+        enrich = mock_ydl_instance.add_post_processor.call_args_list[0][0][0]
+        assert "lyrics" not in enrich.metadata
+
 
 class TestDownloadPlaylistSong:
     def test_artist_is_playlists(self):

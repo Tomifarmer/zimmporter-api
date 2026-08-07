@@ -11,6 +11,7 @@ import boto3
 import mutagen
 from botocore.config import Config
 from mutagen.easyid3 import EasyID3
+from mutagen.id3 import USLT
 from mutagen.mp4 import MP4, MP4Cover
 from yt_dlp.postprocessor import PostProcessor
 
@@ -48,9 +49,14 @@ class EnrichMeta(PostProcessor):
         EasyID3.RegisterTextKey("year", "TDRC")
         file = mutagen.File(info["filepath"], easy=True)
         for key in self.metadata:
+            if key == "lyrics":
+                continue
             file[key] = self.metadata[key]
             self.to_screen(f"Setting {key} to {self.metadata[key]}")
         file.save()
+
+        if self.metadata.get("lyrics"):
+            self._write_lyrics(info["filepath"], self.metadata["lyrics"])
 
         file = MP4(info["filepath"])
         with open(self.cover, "rb") as f:
@@ -58,6 +64,24 @@ class EnrichMeta(PostProcessor):
         file.save()
 
         return [], info
+
+    def _write_lyrics(self, path: str, lyrics: str) -> None:
+        """Embed lyrics into the audio file's standard lyrics tag.
+
+        Writes ``USLT`` for ID3 (mp3) or ``©lyr`` for MP4 (aac/m4a), and
+        degrades silently on any failure so metadata enrichment is never
+        blocked by a lyrics write error.
+        """
+        try:
+            file = mutagen.File(path)
+            if isinstance(file, MP4):
+                file["\xa9lyr"] = lyrics
+            else:
+                file.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
+            file.save()
+            self.to_screen("Embedded lyrics")
+        except Exception as err:  # noqa: BLE001 - lyrics are best-effort
+            self.to_screen(f"Failed to embed lyrics: {err}")
 
 
 class UploadToS3(PostProcessor):

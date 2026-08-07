@@ -31,6 +31,84 @@ def test_enrich_meta_run_returns_tuple(mocker):
     os.unlink(cover_path)
 
 
+def test_enrich_meta_embeds_lyrics(mocker):
+    fd_a, audio_path = tempfile.mkstemp(suffix=".m4a")
+    os.write(fd_a, b"audio_data")
+    os.close(fd_a)
+    fd_c, cover_path = tempfile.mkstemp(suffix=".jpg")
+    os.write(fd_c, b"cover_data")
+    os.close(fd_c)
+
+    mocker.patch("zimmporter.postprocessors.mutagen.File")
+    mocker.patch("zimmporter.postprocessors.MP4")
+    mocker.patch("zimmporter.postprocessors.MP4Cover")
+    write_mock = mocker.patch.object(EnrichMeta, "_write_lyrics")
+
+    pp = EnrichMeta({"title": "Test", "lyrics": "hello world"}, cover_path)
+    pp.run({"filepath": audio_path})
+    write_mock.assert_called_once_with(audio_path, "hello world")
+
+    os.unlink(audio_path)
+    os.unlink(cover_path)
+
+
+def test_enrich_meta_skips_lyrics_when_absent(mocker):
+    fd_a, audio_path = tempfile.mkstemp(suffix=".m4a")
+    os.write(fd_a, b"audio_data")
+    os.close(fd_a)
+    fd_c, cover_path = tempfile.mkstemp(suffix=".jpg")
+    os.write(fd_c, b"cover_data")
+    os.close(fd_c)
+
+    mocker.patch("zimmporter.postprocessors.mutagen.File")
+    mocker.patch("zimmporter.postprocessors.MP4")
+    mocker.patch("zimmporter.postprocessors.MP4Cover")
+    write_mock = mocker.patch.object(EnrichMeta, "_write_lyrics")
+
+    pp = EnrichMeta({"title": "Test"}, cover_path)
+    pp.run({"filepath": audio_path})
+    write_mock.assert_not_called()
+
+    os.unlink(audio_path)
+    os.unlink(cover_path)
+
+
+def test_write_lyrics_mp4_atom(mocker):
+    fake_mp4_cls = type("FakeMP4", (), {})
+    mocker.patch("zimmporter.postprocessors.MP4", fake_mp4_cls)
+    fake_file = mocker.MagicMock()
+    fake_file.__class__ = fake_mp4_cls
+    mocker.patch("zimmporter.postprocessors.mutagen.File", return_value=fake_file)
+
+    pp = EnrichMeta({"title": "Test"}, "/fake/cover.jpg")
+    pp._write_lyrics("/fake/song.m4a", "hello world")
+
+    fake_file.__setitem__.assert_called_once_with("\xa9lyr", "hello world")
+    fake_file.save.assert_called_once()
+
+
+def test_write_lyrics_id3_uslt(mocker):
+    mocker.patch("zimmporter.postprocessors.MP4", type("DummyMP4", (), {}))
+    fake_file = mocker.Mock()
+    mocker.patch("zimmporter.postprocessors.mutagen.File", return_value=fake_file)
+
+    pp = EnrichMeta({"title": "Test"}, "/fake/cover.jpg")
+    pp._write_lyrics("/fake/song.mp3", "hello world")
+
+    fake_file.add.assert_called_once()
+    uslt = fake_file.add.call_args.args[0]
+    assert uslt.lang == "eng"
+    assert uslt.text == "hello world"
+    fake_file.save.assert_called_once()
+
+
+def test_write_lyrics_never_raises(mocker):
+    mocker.patch("zimmporter.postprocessors.mutagen.File", side_effect=RuntimeError("boom"))
+
+    pp = EnrichMeta({"title": "Test"}, "/fake/cover.jpg")
+    pp._write_lyrics("/fake/song.m4a", "hello world")
+
+
 def test_upload_to_s3_is_postprocessor():
     pp = UploadToS3({"title": "Test", "artist": "A", "album": "B"})
     assert isinstance(pp, PostProcessor)

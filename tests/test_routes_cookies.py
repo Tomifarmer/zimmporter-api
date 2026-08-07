@@ -75,10 +75,7 @@ class TestGetCookies:
         assert data["is_stale"] is True
 
     def test_stale_when_session_cookie_expired(self, test_client, stored_cookies):
-        expired = (
-            b"# Netscape HTTP Cookie File\n"
-            b".youtube.com\tTRUE\t/\tTRUE\t1000000000\tSID\tfake_sid_value\n"
-        )
+        expired = b"# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1000000000\tSID\tfake_sid_value\n"
         stored_cookies["content"] = expired
         stored_cookies["modified_at"] = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
         data = test_client.get("/cookies").json()
