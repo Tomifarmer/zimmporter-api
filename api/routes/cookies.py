@@ -12,7 +12,7 @@ are never exposed through the API.
 
 import datetime
 import http.cookiejar
-import tempfile
+import io
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -45,6 +45,9 @@ def _parse_cookies(content: bytes) -> list[dict]:
     summaries.  Raises ``HTTPException(400)`` when the content is empty
     or not a valid cookie file.
 
+    Parsing happens entirely in memory (no temp file) so it works on
+    read-only filesystems (the API pod runs with ``readOnlyRootFilesystem``).
+
     Args:
         content: Raw bytes of a Netscape-format cookies file.
 
@@ -53,12 +56,13 @@ def _parse_cookies(content: bytes) -> list[dict]:
     """
     if not content.strip():
         raise HTTPException(status_code=400, detail="Cookie file is empty")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
     jar = http.cookiejar.MozillaCookieJar()
     try:
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".txt") as tmp:
-            tmp.write(content)
-            tmp.flush()
-            jar.load(tmp.name, ignore_discard=True, ignore_expires=True)
+        jar._really_load(io.StringIO(text), "cookies.txt", ignore_discard=True, ignore_expires=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Not a valid Netscape cookies file") from exc
     return [

@@ -135,3 +135,19 @@ class TestUploadCookies:
         resp = test_client.post("/cookies", files={"file": ("cookies.txt", VALID_COOKIE_FILE, "text/plain")})
         assert resp.status_code == 200
         assert clear == [True]
+
+    def test_upload_works_without_writable_tempdir(self, test_client, stored_cookies, monkeypatch):
+        """Upload must not depend on a writable /tmp (read-only root FS pods)."""
+        import tempfile
+
+        def _no_tempdir():
+            raise FileNotFoundError("No usable temporary directory found")
+
+        monkeypatch.setattr(tempfile, "gettempdir", _no_tempdir)
+        monkeypatch.setattr(tempfile, "NamedTemporaryFile", lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")))
+        resp = test_client.post(
+            "/cookies",
+            files={"file": ("export-2026-08-07.txt", VALID_COOKIE_FILE, "text/plain")},
+        )
+        assert resp.status_code == 200, resp.text
+        assert stored_cookies["content"] == VALID_COOKIE_FILE
