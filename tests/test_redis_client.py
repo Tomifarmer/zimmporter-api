@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 
 def test_get_redis_injects_db_into_url(monkeypatch):
-    import zimmporter.redis_client as redis_client
     import tasks.celery_app as celery_module
+    import zimmporter.redis_client as redis_client
 
     captured = {}
     mock_client = MagicMock()
@@ -28,8 +28,8 @@ def test_get_redis_injects_db_into_url(monkeypatch):
 
 
 def test_get_redis_defaults_to_db0(monkeypatch):
-    import zimmporter.redis_client as redis_client
     import tasks.celery_app as celery_module
+    import zimmporter.redis_client as redis_client
 
     captured = {}
     mock_client = MagicMock()

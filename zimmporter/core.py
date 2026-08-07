@@ -83,9 +83,7 @@ def apply_cookie_config(opts: dict) -> None:
     """
     if is_stale():
         opts.pop("cookiefile", None)
-        logging.getLogger("Zimmporter").warning(
-            "Cookies are flagged stale; continuing without cookies."
-        )
+        logging.getLogger("Zimmporter").warning("Cookies are flagged stale; continuing without cookies.")
         return
     content = get_content()
     if not content:
@@ -502,6 +500,9 @@ class Zimmporter:
                 "date": str(album["year"]),
                 "tracknumber": str(trackNumber),
             }
+            lyrics = _fetch_lyrics(artist, title)
+            if lyrics:
+                metadata["lyrics"] = lyrics
             ydl.add_post_processor(EnrichMeta(metadata, thumbnail_path), when="post_process")
             ydl.add_post_processor(UploadToS3(metadata), when="post_process")
 
@@ -560,3 +561,18 @@ class Zimmporter:
         if d["status"] == "finished":
             self.ytdlp_logger.info("Done downloading, now converting ...")
             self.ytdlp_logger.info(f"Path downloaded: {d['filename']}")
+
+
+def _fetch_lyrics(artist: str, title: str) -> str | None:
+    """Best-effort lyrics lookup for a single track.
+
+    Lazily imports the lyrics module so the API container never pulls it.
+    Returns ``None`` (without raising) when lyrics are disabled, unavailable,
+    or the lookup errors.
+    """
+    from zimmporter.lyrics import fetch_lyrics
+
+    try:
+        return fetch_lyrics(artist, title)
+    except Exception:  # noqa: BLE001 - lyrics are best-effort
+        return None
