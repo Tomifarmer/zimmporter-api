@@ -44,6 +44,29 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 2
 
 
+def flush_song_updates(session, updates: list[dict]) -> None:
+    """Persist a batch of per-song updates in one commit.
+
+    ``None`` values are skipped so existing data (e.g. ``s3_path`` from a
+    previous attempt) is preserved, except that a song which completed with
+    ``status == "success"`` always has its ``error`` cleared so a stale
+    error (e.g. from an earlier failed run) never leaks into a successful
+    row.
+    """
+    for u in updates:
+        values = {k: v for k, v in u.items() if v is not None}
+        if values.get("status") == "success":
+            values["error"] = None
+        if values:
+            session.execute(
+                sa_update(Song)
+                .where(Song.job_id == u["job_id"])
+                .where(Song.title == u["title"])
+                .values(**values)
+            )
+    session.commit()
+
+
 def _refresh_cookie_config() -> None:
     """Re-apply the yt-dlp cookiefile from the Valkey cookie store.
 
@@ -213,16 +236,7 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                     # Commit accumulated batch when threshold reached (song + job progress in one session)
                     if len(updates) >= BATCH_SIZE:
                         with get_session() as session:
-                            for u in updates:
-                                nn = {k: v for k, v in u.items() if v is not None}
-                                if nn:
-                                    session.execute(
-                                        sa_update(Song)
-                                        .where(Song.job_id == self.request.id)
-                                        .where(Song.title == u["title"])
-                                        .values(**nn)
-                                    )
-                            session.commit()
+                            flush_song_updates(session, updates)
                             _update_job(
                                 session,
                                 self.request.id,
@@ -233,16 +247,7 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
 
                 # Final flush of any remaining updates after all futures complete
                 with get_session() as session:
-                    for u in updates:
-                        nn = {k: v for k, v in u.items() if v is not None}
-                        if nn:
-                            session.execute(
-                                sa_update(Song)
-                                .where(Song.job_id == self.request.id)
-                                .where(Song.title == u["title"])
-                                .values(**nn)
-                            )
-                    session.commit()
+                    flush_song_updates(session, updates)
 
             shutil.rmtree(f"{temp_dir}{artist}/{album_name}", ignore_errors=True)
 
@@ -415,16 +420,7 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                     # Commit accumulated batch when threshold reached (song + job progress in one session)
                     if len(updates) >= BATCH_SIZE:
                         with get_session() as session:
-                            for u in updates:
-                                nn = {k: v for k, v in u.items() if v is not None}
-                                if nn:
-                                    session.execute(
-                                        sa_update(Song)
-                                        .where(Song.job_id == self.request.id)
-                                        .where(Song.title == u["title"])
-                                        .values(**nn)
-                                    )
-                            session.commit()
+                            flush_song_updates(session, updates)
                             _update_job(
                                 session,
                                 self.request.id,
@@ -435,16 +431,7 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
 
                 # Final flush of any remaining updates after all futures complete
                 with get_session() as session:
-                    for u in updates:
-                        nn = {k: v for k, v in u.items() if v is not None}
-                        if nn:
-                            session.execute(
-                                sa_update(Song)
-                                .where(Song.job_id == self.request.id)
-                                .where(Song.title == u["title"])
-                                .values(**nn)
-                            )
-                    session.commit()
+                    flush_song_updates(session, updates)
 
             shutil.rmtree(f"{temp_dir}playlists/{album_name}", ignore_errors=True)
 
