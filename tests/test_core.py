@@ -245,6 +245,19 @@ class TestApplyCookieConfig:
         apply_cookie_config(opts)
         assert "cookiefile" not in opts
 
+    def test_cookiefile_skipped_when_cache_not_writable(self, tmp_path, monkeypatch):
+        """Must not crash when the cache dir can't be written (read-only FS pod)."""
+        monkeypatch.setattr("zimmporter.core.get_content", lambda: b"# Netscape HTTP Cookie File\n")
+        monkeypatch.setattr("zimmporter.core.is_stale", lambda: False)
+
+        def _deny(*args, **kwargs):
+            raise OSError(30, "Read-only file system")
+
+        monkeypatch.setattr("os.makedirs", _deny)
+        opts = {"cachedir": str(tmp_path / "cache")}
+        apply_cookie_config(opts)
+        assert "cookiefile" not in opts
+
 
 class TestFlagStaleCookies:
     @patch("zimmporter.cookie_health.mark_stale")

@@ -73,6 +73,11 @@ def apply_cookie_config(opts: dict) -> None:
     every download with the bot check.  A fresh upload clears the flag and
     re-enables cookies on the next call.
 
+    If the cookie file cannot be written (e.g. an API pod whose root
+    filesystem is read-only and has no writable cache mount), the call
+    degrades gracefully: ``cookiefile`` is left unset and a warning is
+    logged, rather than crashing the importing process.
+
     Args:
         opts: yt-dlp options dict to mutate in place.
     """
@@ -86,10 +91,18 @@ def apply_cookie_config(opts: dict) -> None:
     if not content:
         return
     cookie_dir = os.path.join(opts.get("cachedir", "/tmp/yt-dlp-cache"), "cookies")
-    os.makedirs(cookie_dir, exist_ok=True)
     writable_copy = os.path.join(cookie_dir, "cookies.txt")
-    with open(writable_copy, "wb") as f:
-        f.write(content)
+    try:
+        os.makedirs(cookie_dir, exist_ok=True)
+        with open(writable_copy, "wb") as f:
+            f.write(content)
+    except OSError:
+        logging.getLogger("Zimmporter").warning(
+            "Could not write cookies to %s; continuing without cookies.",
+            writable_copy,
+            exc_info=True,
+        )
+        return
     opts["cookiefile"] = writable_copy
 
 
