@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 def test_get_redis_injects_db_into_url(monkeypatch):
     import zimmporter.redis_client as redis_client
+    import tasks.celery_app as celery_module
 
     captured = {}
     mock_client = MagicMock()
@@ -15,7 +16,7 @@ def test_get_redis_injects_db_into_url(monkeypatch):
 
     monkeypatch.setattr(redis_client.Redis, "from_url", staticmethod(_fake_from_url))
     monkeypatch.setattr(
-        redis_client.celery_app.conf,
+        celery_module.celery_app.conf,
         "broker_url",
         "redis://valkey:6379/0",
     )
@@ -28,6 +29,7 @@ def test_get_redis_injects_db_into_url(monkeypatch):
 
 def test_get_redis_defaults_to_db0(monkeypatch):
     import zimmporter.redis_client as redis_client
+    import tasks.celery_app as celery_module
 
     captured = {}
     mock_client = MagicMock()
@@ -38,7 +40,7 @@ def test_get_redis_defaults_to_db0(monkeypatch):
 
     monkeypatch.setattr(redis_client.Redis, "from_url", staticmethod(_fake_from_url))
     monkeypatch.setattr(
-        redis_client.celery_app.conf,
+        celery_module.celery_app.conf,
         "broker_url",
         "redis://valkey:6379/0",
     )

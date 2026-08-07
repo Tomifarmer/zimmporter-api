@@ -12,8 +12,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 from redis import Redis
 
-from tasks.celery_app import celery_app
-
 
 def get_redis(database: int = 0) -> Redis:
     """Return a Redis client bound to ``database``.
@@ -24,6 +22,8 @@ def get_redis(database: int = 0) -> Redis:
     Returns:
         A configured :class:`redis.Redis` client.
     """
+    from tasks.celery_app import celery_app
+
     parts = urlsplit(celery_app.conf.broker_url)
     url = urlunsplit((parts.scheme, parts.netloc, f"/{database}", parts.query, parts.fragment))
     return Redis.from_url(url)
