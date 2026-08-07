@@ -98,9 +98,7 @@ def apply_cookie_config(opts: dict) -> None:
             f.write(content)
     except OSError:
         logging.getLogger("Zimmporter").warning(
-            "Could not write cookies to %s; continuing without cookies.",
-            writable_copy,
-            exc_info=True,
+            "Could not write cookies to %s; continuing without cookies.", writable_copy
         )
         return
     opts["cookiefile"] = writable_copy
