@@ -225,6 +225,122 @@ class TestDownloadAlbumSong:
         enrich = mock_ydl_instance.add_post_processor.call_args_list[0][0][0]
         assert "lyrics" not in enrich.metadata
 
+    def test_genre_passed_to_enrich_meta(self, mocker):
+        mocker.patch("zimmporter.core._fetch_lyrics", return_value=None)
+        mock_ydl = mocker.patch("yt_dlp.YoutubeDL")
+        mock_ydl_context = MagicMock()
+        mock_ydl_instance = MagicMock()
+        mock_ydl_context.__enter__.return_value = mock_ydl_instance
+        mock_ydl.return_value = mock_ydl_context
+
+        Zimmporter.download_album_song(
+            {"title": "Track One", "videoId": "vid1", "trackNumber": 1},
+            {"title": "Revival", "year": 2024, "genre": "Hip-Hop/Rap"},
+            "Eminem",
+            "/fake/cover.jpg",
+            thread_id=1,
+        )
+
+        enrich = mock_ydl_instance.add_post_processor.call_args_list[0][0][0]
+        assert enrich.metadata["genre"] == "Hip-Hop/Rap"
+
+    def test_genre_none_when_album_lacks_genre(self, mocker):
+        mocker.patch("zimmporter.core._fetch_lyrics", return_value=None)
+        mock_ydl = mocker.patch("yt_dlp.YoutubeDL")
+        mock_ydl_context = MagicMock()
+        mock_ydl_instance = MagicMock()
+        mock_ydl_context.__enter__.return_value = mock_ydl_instance
+        mock_ydl.return_value = mock_ydl_context
+
+        Zimmporter.download_album_song(
+            {"title": "Track One", "videoId": "vid1", "trackNumber": 1},
+            {"title": "Revival", "year": 2024},
+            "Artist",
+            "/fake/cover.jpg",
+            thread_id=1,
+        )
+
+        enrich = mock_ydl_instance.add_post_processor.call_args_list[0][0][0]
+        assert enrich.metadata["genre"] is None
+
+
+class TestDownloadBulk:
+    def test_albums_lookup_genre_once_per_album(self, mocker, tmp_path):
+        mocker.patch("zimmporter.core.temp_dir", f"{tmp_path}/")
+        zimm = mocker.patch("zimmporter.core.Zimmporter", wraps=object).return_value
+        # simpler: build a real instance with mocked client
+        zimm = Zimmporter()
+        zimm.yt = MagicMock()
+        album_data = {
+            "title": "Revival",
+            "year": "2017",
+            "artists": [{"name": "Eminem"}],
+            "thumbnails": [{"url": "https://example.com/cover.jpg"}],
+            "tracks": [
+                {"title": "A", "videoId": "v1", "trackNumber": 1},
+                {"title": "B", "videoId": "v2", "trackNumber": 2},
+            ],
+        }
+        zimm.yt.get_album.return_value = album_data
+        lookup = mocker.patch("zimmporter.core._lookup_genre", return_value="Hip-Hop/Rap")
+        mocker.patch("zimmporter.core.requests.get", return_value=MagicMock(content=b"img"))
+
+        captured = {}
+
+        class FakePool:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def starmap(self, fn, items):
+                captured["items"] = list(items)
+
+        mocker.patch("billiard.Pool", FakePool)
+
+        zimm.download_bulk("MPREb_1", album=True, playlist=False, concurrent=2)
+
+        lookup.assert_called_once_with("Eminem", "Revival")
+        assert captured["items"][0][1]["genre"] == "Hip-Hop/Rap"
+
+    def test_playlists_skip_genre_lookup(self, mocker, tmp_path):
+        mocker.patch("zimmporter.core.temp_dir", f"{tmp_path}/")
+        zimm = Zimmporter()
+        zimm.yt = MagicMock()
+        zimm.yt.get_playlist.return_value = {
+            "title": "My Playlist",
+            "tracks": [{"title": "T1", "videoId": "v1", "thumbnails": [{"url": "https://example.com/c.jpg"}]}],
+        }
+
+        lookup = mocker.patch("zimmporter.core._lookup_genre", return_value="Hip-Hop/Rap")
+        mocker.patch("zimmporter.core.requests.get", return_value=MagicMock(content=b"img"))
+
+        captured = {}
+
+        class FakePool:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def starmap(self, fn, items):
+                captured["items"] = list(items)
+
+        mocker.patch("billiard.Pool", FakePool)
+
+        zimm.download_bulk("VL1", album=False, playlist=True, concurrent=2)
+
+        lookup.assert_not_called()
+        assert "genre" not in captured["items"][0][1]
+
 
 class TestDownloadPlaylistSong:
     def test_artist_is_playlists(self):

@@ -36,7 +36,7 @@ from db.models import Job, Song
 from tasks.celery_app import celery_app
 from tasks.index import upsert_available_album
 from zimmporter.cert import get_ca_cert
-from zimmporter.core import YTDL_OPTS, Zimmporter, apply_cookie_config, temp_dir
+from zimmporter.core import YTDL_OPTS, Zimmporter, _lookup_genre, apply_cookie_config, temp_dir
 from zimmporter.ytdlp_logger import YTDLPLogger
 
 logger = logging.getLogger(__name__)
@@ -59,10 +59,7 @@ def flush_song_updates(session, updates: list[dict]) -> None:
             values["error"] = None
         if values:
             session.execute(
-                sa_update(Song)
-                .where(Song.job_id == u["job_id"])
-                .where(Song.title == u["title"])
-                .values(**values)
+                sa_update(Song).where(Song.job_id == u["job_id"]).where(Song.title == u["title"]).values(**values)
             )
     session.commit()
 
@@ -147,7 +144,7 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
     """
     with get_session() as session:
         session.query(Job).filter(Job.id == self.request.id).update(
-            {"status": "running", "message": "Started", "current_album": None}
+            {"status": "running", "message": "Started", "current_album": None, "error": None}
         )
 
     _refresh_cookie_config()
@@ -160,6 +157,12 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
             album_data = zimm.yt.get_album(id)
             artist = album_data["artists"][0]["name"]
             album_name = album_data["title"]
+            genre = _lookup_genre(artist, album_name)
+            album_data["genre"] = genre
+            if genre:
+                logger.info("Genre lookup: %s - %s -> %s", artist, album_name, genre)
+            else:
+                logger.info("Genre lookup: no genre found for %s - %s", artist, album_name)
             release_date = album_data.get("releaseDate") or None
             thumbnail_url = album_data["thumbnails"][-1]["url"]
             thumbnail_path = f"{temp_dir}{artist}/{album_name}/cover.jpg"
@@ -271,6 +274,7 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                 message="All albums downloaded successfully",
                 current_album=None,
                 current_song=0,
+                error=None,
             )
         return {"status": "success"}
 
@@ -309,7 +313,7 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
     """
     with get_session() as session:
         session.query(Job).filter(Job.id == self.request.id).update(
-            {"status": "running", "message": "Started", "current_album": None}
+            {"status": "running", "message": "Started", "current_album": None, "error": None}
         )
 
     _refresh_cookie_config()
@@ -455,6 +459,7 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                 message="All playlists downloaded successfully",
                 current_album=None,
                 current_song=0,
+                error=None,
             )
         return {"status": "success"}
 

@@ -73,6 +73,86 @@ def test_enrich_meta_skips_lyrics_when_absent(mocker):
     os.unlink(cover_path)
 
 
+def test_enrich_meta_writes_genre(mocker):
+    fd_a, audio_path = tempfile.mkstemp(suffix=".m4a")
+    os.write(fd_a, b"audio_data")
+    os.close(fd_a)
+    fd_c, cover_path = tempfile.mkstemp(suffix=".jpg")
+    os.write(fd_c, b"cover_data")
+    os.close(fd_c)
+
+    mutagen_file = mocker.patch("zimmporter.postprocessors.mutagen.File")
+    mocker.patch("zimmporter.postprocessors.MP4")
+    mocker.patch("zimmporter.postprocessors.MP4Cover")
+
+    pp = EnrichMeta({"title": "Test", "genre": "Hip-Hop/Rap"}, cover_path)
+    pp.run({"filepath": audio_path})
+
+    mutagen_file.return_value.__setitem__.assert_any_call("genre", "Hip-Hop/Rap")
+
+    os.unlink(audio_path)
+    os.unlink(cover_path)
+
+
+def test_enrich_meta_skips_none_values(mocker):
+    fd_a, audio_path = tempfile.mkstemp(suffix=".m4a")
+    os.write(fd_a, b"audio_data")
+    os.close(fd_a)
+    fd_c, cover_path = tempfile.mkstemp(suffix=".jpg")
+    os.write(fd_c, b"cover_data")
+    os.close(fd_c)
+
+    mutagen_file = mocker.patch("zimmporter.postprocessors.mutagen.File")
+    mocker.patch("zimmporter.postprocessors.MP4")
+    mocker.patch("zimmporter.postprocessors.MP4Cover")
+
+    pp = EnrichMeta({"title": "Test", "genre": None}, cover_path)
+    pp.run({"filepath": audio_path})
+
+    writes = mutagen_file.return_value.__setitem__.call_args_list
+    assert ("genre", None) not in [call.args for call in writes]
+    assert ("title", "Test") in [call.args for call in writes]
+
+    os.unlink(audio_path)
+    os.unlink(cover_path)
+
+
+def test_enrich_meta_clears_stale_genre_when_absent(mocker):
+    fd_c, cover_path = tempfile.mkstemp(suffix=".jpg")
+    os.write(fd_c, b"cover_data")
+    os.close(fd_c)
+
+    mocker.patch("zimmporter.postprocessors.MP4")
+    mocker.patch("zimmporter.postprocessors.MP4Cover")
+    mutagen_file = mocker.patch("zimmporter.postprocessors.mutagen.File")
+    mutagen_file.return_value.__contains__.return_value = True
+
+    pp = EnrichMeta({"title": "Test"}, cover_path)
+    pp.run({"filepath": "/tmp/song.m4a"})
+
+    deleted = [call.args[0] for call in mutagen_file.return_value.__delitem__.call_args_list]
+    assert "genre" in deleted
+
+    os.unlink(cover_path)
+
+
+def test_enrich_meta_keeps_genre_when_provided(mocker):
+    fd_c, cover_path = tempfile.mkstemp(suffix=".jpg")
+    os.write(fd_c, b"cover_data")
+    os.close(fd_c)
+
+    mocker.patch("zimmporter.postprocessors.MP4")
+    mocker.patch("zimmporter.postprocessors.MP4Cover")
+    mutagen_file = mocker.patch("zimmporter.postprocessors.mutagen.File")
+
+    pp = EnrichMeta({"title": "Test", "genre": "Rock"}, cover_path)
+    pp.run({"filepath": "/tmp/song.m4a"})
+
+    mutagen_file.return_value.__delitem__.assert_not_called()
+
+    os.unlink(cover_path)
+
+
 def test_write_lyrics_mp4_atom(mocker):
     fake_mp4_cls = type("FakeMP4", (), {})
     mocker.patch("zimmporter.postprocessors.MP4", fake_mp4_cls)

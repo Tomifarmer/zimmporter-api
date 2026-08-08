@@ -9,6 +9,7 @@ def _create_job(
     status="pending",
     requested_by=None,
     requested_groups=None,
+    error=None,
 ):
     job = Job(
         job_type=job_type,
@@ -17,6 +18,7 @@ def _create_job(
         message="Test job",
         requested_by=requested_by,
         requested_groups=requested_groups,
+        error=error,
     )
     session.add(job)
     session.flush()
@@ -475,3 +477,17 @@ class TestRetryJob:
     def test_retry_returns_404_for_missing_job(self, test_client):
         resp = test_client.post("/jobs/99999/retry")
         assert resp.status_code == 404
+
+    def test_retry_clears_stale_job_error(self, test_client, mock_celery_tasks):
+        mock_album_task, _ = mock_celery_tasks
+        with get_session() as session:
+            job = _create_job(session, status="failed", error="Job stalled — worker likely crashed")
+            _create_song(session, job.id, status="failed", error="Worker crashed")
+
+        resp = test_client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 200
+
+        with get_session() as session:
+            job = session.query(Job).filter(Job.id == job.id).first()
+            assert job.status == "running"
+            assert job.error is None

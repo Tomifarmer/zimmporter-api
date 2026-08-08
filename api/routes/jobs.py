@@ -294,6 +294,7 @@ def retry_job(job_id: int, request: Request) -> JobResponse:
         browse_id = job.browse_id
         job.status = "running"
         job.message = "Retrying failed songs"
+        job.error = None
         session.commit()
 
     task = download_album if job_type == "album" else download_playlist

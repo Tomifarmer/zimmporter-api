@@ -51,8 +51,15 @@ class EnrichMeta(PostProcessor):
         for key in self.metadata:
             if key == "lyrics":
                 continue
-            file[key] = self.metadata[key]
-            self.to_screen(f"Setting {key} to {self.metadata[key]}")
+            value = self.metadata[key]
+            if value is None:
+                continue
+            file[key] = value
+            self.to_screen(f"Setting {key} to {value}")
+
+        if self.metadata.get("genre") is None:
+            self._clear_genre(file)
+
         file.save()
 
         if self.metadata.get("lyrics"):
@@ -82,6 +89,20 @@ class EnrichMeta(PostProcessor):
             self.to_screen("Embedded lyrics")
         except Exception as err:  # noqa: BLE001 - lyrics are best-effort
             self.to_screen(f"Failed to embed lyrics: {err}")
+
+    def _clear_genre(self, file) -> None:
+        """Remove any existing genre tag so stale values are not kept.
+
+        Clears the genre on both MP4 (``©gen``) and ID3 (``TCON``/``genre``)
+        spellings.  Best-effort: missing tags or unsupported files are
+        silently ignored.
+        """
+        for tag in ("genre", "\xa9gen", "TCON"):
+            try:
+                if tag in file:
+                    del file[tag]
+            except Exception:  # noqa: BLE001 - tag removal is best-effort
+                pass
 
 
 class UploadToS3(PostProcessor):

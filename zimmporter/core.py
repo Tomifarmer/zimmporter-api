@@ -325,6 +325,12 @@ class Zimmporter:
                 album_data = self.yt.get_album(id)
                 artist = album_data["artists"][0]["name"]
                 album_name = album_data["title"]
+                genre = _lookup_genre(artist, album_name)
+                album_data["genre"] = genre
+                if genre:
+                    self.logger.info(f"Genre lookup: {artist} - {album_name} -> {genre}")
+                else:
+                    self.logger.info(f"Genre lookup: no genre found for {artist} - {album_name}")
                 thumnail_url = album_data["thumbnails"][-1]["url"]
                 thumbnail_path = f"{temp_dir}{artist}/{album_name}/cover.jpg"
                 os.makedirs(f"{temp_dir}{artist}/{album_name}", exist_ok=True)
@@ -499,10 +505,14 @@ class Zimmporter:
                 "album": album["title"],
                 "date": str(album["year"]),
                 "tracknumber": str(trackNumber),
+                "genre": album.get("genre"),
             }
             lyrics = _fetch_lyrics(artist, title)
             if lyrics:
                 metadata["lyrics"] = lyrics
+                zimm.logger.info(f"[{sid}] Lyrics fetched for {artist} - {title}")
+            else:
+                zimm.logger.info(f"[{sid}] No lyrics found for {artist} - {title}")
             ydl.add_post_processor(EnrichMeta(metadata, thumbnail_path), when="post_process")
             ydl.add_post_processor(UploadToS3(metadata), when="post_process")
 
@@ -561,6 +571,21 @@ class Zimmporter:
         if d["status"] == "finished":
             self.ytdlp_logger.info("Done downloading, now converting ...")
             self.ytdlp_logger.info(f"Path downloaded: {d['filename']}")
+
+
+def _lookup_genre(artist: str, album: str) -> str | None:
+    """Best-effort genre lookup for an album.
+
+    Lazily imports the genre module so the API container never pulls it.
+    Returns ``None`` (without raising) when genre lookup is disabled,
+    unavailable, or the lookup errors.
+    """
+    from zimmporter.genre import lookup_genre
+
+    try:
+        return lookup_genre(artist, album)
+    except Exception:  # noqa: BLE001 - genres are best-effort
+        return None
 
 
 def _fetch_lyrics(artist: str, title: str) -> str | None:
