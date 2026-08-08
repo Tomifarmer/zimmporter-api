@@ -10,23 +10,12 @@ immediately with the ``job_id`` so callers can poll ``GET
 from fastapi import APIRouter, Request
 
 from api.models import DownloadRequest, JobResponse
+from api.user import get_requested_by, get_requested_groups_delimited
 from db.engine import get_session
 from db.models import Job
 from tasks.download import download_album, download_playlist
 
 download_router = APIRouter(prefix="/download", tags=["download"])
-
-
-def _get_requested_by(request: Request) -> str | None:
-    """Extract the requesting user's name from an authenticated request.
-
-    Returns ``None`` when auth is disabled or the request was authenticated
-    via API key.
-    """
-    user = request.scope.get("user")
-    if user is None:
-        return None
-    return user.get("name") or user.get("sub")
 
 
 @download_router.post("/album", response_model=JobResponse)
@@ -51,7 +40,8 @@ def album_download(req: DownloadRequest, request: Request) -> JobResponse:
             browse_id=req.id,
             status="pending",
             message="Queued",
-            requested_by=_get_requested_by(request),
+            requested_by=get_requested_by(request),
+            requested_groups=get_requested_groups_delimited(request),
         )
         session.add(job)
         session.flush()
@@ -82,7 +72,8 @@ def playlist_download(req: DownloadRequest, request: Request) -> JobResponse:
             browse_id=req.id,
             status="pending",
             message="Queued",
-            requested_by=_get_requested_by(request),
+            requested_by=get_requested_by(request),
+            requested_groups=get_requested_groups_delimited(request),
         )
         session.add(job)
         session.flush()

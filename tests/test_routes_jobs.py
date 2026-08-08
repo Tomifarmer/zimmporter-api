@@ -2,13 +2,21 @@ from db.engine import get_session
 from db.models import Job, Song
 
 
-def _create_job(session, job_type="album", browse_id="MPREb_test", status="pending", requested_by=None):
+def _create_job(
+    session,
+    job_type="album",
+    browse_id="MPREb_test",
+    status="pending",
+    requested_by=None,
+    requested_groups=None,
+):
     job = Job(
         job_type=job_type,
         browse_id=browse_id,
         status=status,
         message="Test job",
         requested_by=requested_by,
+        requested_groups=requested_groups,
     )
     session.add(job)
     session.flush()
@@ -151,6 +159,129 @@ class TestListJobsFiltered:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 2
+
+
+def _oidc_auth(monkeypatch, mocker, name="Seeker", sub="auth-1", groups=None):
+    monkeypatch.setenv("USE_SOCIAL_LOGIN", "true")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "https://idp.example.com")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "client-id")
+    claims = {"sub": sub, "name": name}
+    if groups is not None:
+        claims["groups"] = groups
+    mocker.patch("api.app._validate_oidc_token", return_value=claims)
+
+
+class TestGroupVisibility:
+    """Tests verifying group-based job visibility for OIDC users."""
+
+    def _auth(self, monkeypatch, mocker, **kwargs):
+        _oidc_auth(monkeypatch, mocker, **kwargs)
+        return {"Authorization": "Bearer test-token"}
+
+    def test_same_group_user_sees_group_jobs(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Fan", groups=["SEB"])
+        with get_session() as session:
+            _create_job(session, browse_id="seb-job", requested_by="Fan", requested_groups=",SEB,")
+            _create_job(session, browse_id="ibr-job", requested_by="Other", requested_groups=",IBR,")
+
+        resp = test_client.get("/jobs", headers=headers)
+        assert resp.status_code == 200
+        assert [j["browse_id"] for j in resp.json()] == ["seb-job"]
+
+    def test_system_jobs_visible_to_all_group_users(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="User", groups=["SEB"])
+        with get_session() as session:
+            _create_job(session, browse_id="system-job", requested_by=None, requested_groups=None)
+            _create_job(session, browse_id="seb-job", requested_by="Fan", requested_groups=",SEB,")
+
+        resp = test_client.get("/jobs", headers=headers)
+        across = {j["browse_id"] for j in resp.json()}
+        assert across == {"system-job", "seb-job"}
+
+    def test_user_always_sees_own_jobs_without_groups(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Seeker", groups=["SEB"])
+        with get_session() as session:
+            _create_job(session, browse_id="legacy-own", requested_by="Seeker", requested_groups=None)
+            _create_job(session, browse_id="other", requested_by="Fan", requested_groups=",SEB,")
+
+        resp = test_client.get("/jobs", headers=headers)
+        across = {j["browse_id"] for j in resp.json()}
+        assert across == {"legacy-own", "other"}
+
+    def test_admin_group_sees_all_jobs(self, test_client, monkeypatch, mocker):
+        monkeypatch.setenv("JOB_ADMIN_GROUPS", "IBR")
+        headers = self._auth(monkeypatch, mocker, name="Overlord", groups=["IBR"])
+        with get_session() as session:
+            _create_job(session, browse_id="ibr-job", requested_by="A", requested_groups=",IBR,")
+            _create_job(session, browse_id="seb-job", requested_by="B", requested_groups=",SEB,")
+
+        resp = test_client.get("/jobs", headers=headers)
+        assert len(resp.json()) == 2
+
+    def test_group_not_in_admin_env_does_not_bypass(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="IBRUser", groups=["IBR"])
+        with get_session() as session:
+            _create_job(session, browse_id="ibr-job", requested_by="A", requested_groups=",IBR,")
+            _create_job(session, browse_id="seb-job", requested_by="B", requested_groups=",SEB,")
+
+        resp = test_client.get("/jobs", headers=headers)
+        assert [j["browse_id"] for j in resp.json()] == ["ibr-job"]
+
+    def test_get_job_returns_404_for_other_group(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="User", groups=["SEB"])
+        with get_session() as session:
+            ibr = _create_job(session, browse_id="ibr", requested_by="A", requested_groups=",IBR,")
+            seb = _create_job(session, browse_id="seb", requested_by="B", requested_groups=",SEB,")
+
+        assert test_client.get(f"/jobs/{ibr.id}", headers=headers).status_code == 404
+        assert test_client.get(f"/jobs/{seb.id}", headers=headers).status_code == 200
+
+    def test_get_job_admin_can_read_any_job(self, test_client, monkeypatch, mocker):
+        monkeypatch.setenv("JOB_ADMIN_GROUPS", "IBR")
+        headers = self._auth(monkeypatch, mocker, name="Overlord", groups=["IBR"])
+        with get_session() as session:
+            seb = _create_job(session, browse_id="seb", requested_by="B", requested_groups=",SEB,")
+
+        assert test_client.get(f"/jobs/{seb.id}", headers=headers).status_code == 200
+
+    def test_retry_forbidden_for_other_group(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="User", groups=["SEB"])
+        with get_session() as session:
+            ibr = _create_job(session, status="running", requested_by="A", requested_groups=",IBR,")
+            _create_song(session, ibr.id, status="failed", error="err")
+
+        resp = test_client.post(f"/jobs/{ibr.id}/retry", headers=headers)
+        assert resp.status_code == 403
+
+    def test_retry_allowed_for_same_group(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Fan", groups=["SEB"])
+        with get_session() as session:
+            seb = _create_job(session, status="running", requested_by="B", requested_groups=",SEB,")
+            _create_song(session, seb.id, status="failed", error="err")
+
+        resp = test_client.post(f"/jobs/{seb.id}/retry", headers=headers)
+        assert resp.status_code == 200
+
+    def test_retry_allowed_for_admin(self, test_client, monkeypatch, mocker):
+        monkeypatch.setenv("JOB_ADMIN_GROUPS", "IBR")
+        headers = self._auth(monkeypatch, mocker, name="Overlord", groups=["IBR"])
+        with get_session() as session:
+            job = _create_job(session, status="running", requested_by="B", requested_groups=",SEB,")
+            _create_song(session, job.id, status="failed", error="err")
+
+        resp = test_client.post(f"/jobs/{job.id}/retry", headers=headers)
+        assert resp.status_code == 200
+
+    def test_stats_respect_group_visibility(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Fan", groups=["SEB"])
+        with get_session() as session:
+            _create_job(session, status="success", requested_by="A", requested_groups=",SEB,")
+            _create_job(session, status="success", requested_by="B", requested_groups=",IBR,")
+
+        resp = test_client.get("/jobs/stats", headers=headers)
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["success"] == 1
 
 
 class TestListJobsByStatus:

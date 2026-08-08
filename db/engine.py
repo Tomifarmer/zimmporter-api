@@ -61,6 +61,7 @@ def migrate_schema() -> None:
 
     job_additions = {
         "requested_by": "ALTER TABLE jobs ADD COLUMN requested_by VARCHAR(256) NULL",
+        "requested_groups": "ALTER TABLE jobs ADD COLUMN requested_groups VARCHAR(512) NULL",
     }
 
     existing_job_columns = {col["name"] for col in inspector.get_columns("jobs")}

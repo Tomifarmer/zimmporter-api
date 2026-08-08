@@ -49,6 +49,7 @@ class Job(Base):
         total_songs: Total songs in current album.
         artist: Artist name (NULL for playlists).
         requested_by: Name or sub of the OIDC user who requested the job (NULL for API key or unauthenticated requests).
+        requested_groups: Comma-separated groups of the OIDC user who requested the job (NULL for API key or unauthenticated requests).
         created_at: UTC timestamp of job creation.
         updated_at: UTC timestamp of last update.
         songs: Relationship to :class:`Song` rows (cascade delete).
@@ -70,6 +71,7 @@ class Job(Base):
     album_name = Column(String(512), nullable=True)
     artist = Column(String(512), nullable=True)
     requested_by = Column(String(256), nullable=True)
+    requested_groups = Column(String(512), nullable=True)
     album_progress = Column(Integer, default=0)
     total_albums = Column(Integer, default=0)
     current_song = Column(Integer, default=0)
