@@ -51,8 +51,10 @@ Client (curl / UI)
 | `cert.py` | Private CA certificate configuration: `get_ca_cert()` returns cert path from env vars, `configure_ssl()` sets up requests library at startup |
 | `core.py` | `Zimmporter` class: search via ytmusicapi, download via yt-dlp + `billiard.Pool`, AAC conversion, per-song download methods returning status dicts |
 | `cookie_health.py` | Cookie staleness helpers: `mark_stale()`, `is_stale()`, `clear_stale()` backed by a Valkey flag (db 3) |
-| `postprocessors.py` | yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover embed), `UploadToS3` (S3 upload + file cleanup) |
+| `postprocessors.py` | yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover art + lyrics + genre embed), `UploadToS3` (S3 upload + file cleanup) |
 | `ytdlp_logger.py` | Custom logger with per-song `[album/song]` context injected into every log line |
+| `lyrics.py` | Best-effort lyrics lookup against LRCLIB (`fetch_lyrics`), embedded as `USLT` (ID3) / `©lyr` (MP4) |
+| `genre.py` | Best-effort album genre lookup against the iTunes Search API (`lookup_genre`), embedded as `TCON`/`©gen` |
 
 
 ### `api/` - FastAPI Application
@@ -228,6 +230,22 @@ When `API_PROXY_FETCH=true` is set, the API proxies thumbnail images:
 - **Search route**: Thumbnails are fetched concurrently (up to 10 at once), cached in Valkey db 3, and embedded as base64 data URIs in the response
 - **Standalone endpoint**: `GET /thumbnail?url=` returns raw image bytes (excluded from auth)
 - **Config**: `API_PROXY_FETCH` env var controls the feature; `_MAX_THUMB_SIZE` (10 MB) caps image size
+
+### Metadata Enrichment (Lyrics & Genre)
+
+YouTube Music never exposes lyrics or a real genre, so the worker computes both at download time and embeds them into standard audio tags:
+
+- **Lyrics** — when `ENABLE_LYRICS=true` (default), `zimmporter/lyrics.py` queries the [LRCLIB API](https://lrclib.net) (`GET /api/get` with an `/api/search` fallback) per **album** song and strips LRC timestamps. Only plain lyrics are embedded (`USLT` for ID3/mp3, `©lyr` for MP4/m4a), because the downloaded audio is a YouTube clip whose timing cannot be matched by synced timestamps. Playlist downloads skip lyrics (artist is unknown there).
+- **Genre** — when `ENABLE_GENRE=true` (default), `zimmporter/genre.py` looks the album genre up on the iTunes Search API (`zimmporter/genre.py:59`) before embedding `primaryGenreName` as `TCON` (ID3) or `©gen` (MP4). Files with no resolved genre have any stale genre tag cleared (`zimmporter/postprocessors.py:61`).
+
+Both lookups are **best-effort**: misses, timeouts, HTTP errors, or disabled lookups return `None` and never fail or block the download. The worker logs each lookup (`Genre lookup: <artist> - <album> -> <genre>`, `Lyrics fetched for <artist> - <title>`), so a missing tag is diagnosable from worker logs.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_LYRICS` | `true` | Set to `"false"` to disable best-effort lyrics lookup/embedding (LRCLIB) |
+| `LRCLIB_BASE_URL` | `https://lrclib.net/api` | LRCLIB endpoint override |
+| `ENABLE_GENRE` | `true` | Set to `"false"` to disable iTunes album genre lookup |
+| `ITUNES_LOOKUP_LIMIT` | `3` | Number of candidate albums to inspect per genre lookup |
 
 ### Authentication (optional)
 

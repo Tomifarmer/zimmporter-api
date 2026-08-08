@@ -447,7 +447,7 @@ When authenticated via Bearer token (OIDC user), only the requesting user's jobs
 POST /jobs/{job_id}/retry
 ```
 
-Resets all failed songs in a job to `pending` (clearing their error messages) and re-dispatches the original Celery task. Ownership check applies: returns `403` if the job belongs to a different OIDC user.
+Resets all failed songs in a job to `pending` (clearing their error messages) and re-dispatches the original Celery task. Also clears the job's own `error` field, so a stale failure message never resurfaces on a retried job. Ownership check applies: returns `403` if the job belongs to a different OIDC user.
 
 **Path Parameters:**
 
@@ -481,16 +481,18 @@ POST /download/{album|playlist}
     -> Celery: task dispatched (task_id = job.id)
 
 Celery worker picks up task
-    -> DB: status = "running", message = "Started"
+    -> DB: status = "running", message = "Started", error = NULL  (clears stale failure)
     -> For each album/playlist:
         -> Fetch tracks from ytmusicapi
         -> Insert Song rows (status=pending)
         -> Pool downloads songs in parallel
         -> Per-song: DB updated (success/failed, s3_path)
         -> Job progress updated (current_song / total_songs)
-    -> On completion: status = "success"
+    -> On completion: status = "success", error = NULL
     -> On error: status = "failed", error = message
 ```
+
+A job's `error` is cleared whenever it starts running again (fresh task, retry, or failed-song retry), so a previously failed job that later succeeds never reports a stale error.
 
 ### Job Statuses
 

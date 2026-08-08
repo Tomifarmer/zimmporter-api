@@ -1,6 +1,6 @@
 # Zimmporter
 
-Music importer API that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to an S3-compatible bucket. Backed by FastAPI + Celery with MariaDB for job tracking.
+Music importer API that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art + lyrics (LRCLIB) + genre (iTunes), and uploads to an S3-compatible bucket. Backed by FastAPI + Celery with MariaDB for job tracking.
 
 ## Getting started
 
@@ -14,7 +14,7 @@ Then open the Swagger UI at http://localhost:8000/docs or try the API directly.
 
 ### Endpoints
 
-- **`GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes. Each result includes an `available` boolean flagging albums/playlists already present in the S3 library index (refreshed regularly by the Celery beat `tasks.index_albums` task).
+- **`GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes. Each result includes an `available` boolean flagging albums/playlists already present in the S3 library index (refreshed regularly by the periodic library index scan).
 - **`POST /download/album`** — Queue one or more albums (`id: "MPREb_xxx,MPREb_yyy"`) with concurrency (`concurrent`: 1–32). Returns `job_id`.
 - **`POST /download/playlist`** — Queue one or more playlists. Same flow as album download.
 - **`GET /jobs/<id>`** — Poll a specific job for per-song progress.
@@ -136,6 +136,10 @@ Key variables:
 | Index | `INDEX_INTERVAL_MINUTES` | `30` | How often (minutes) the API pod dispatches the library index scan |
 | Index | `INDEX_SOURCE` | `s3` | Which library sources feed the available-albums index: `s3`, `navidrome`, or `both` |
 | Index | `NAVIDROME_URL` / `NAVIDROME_USER` / `NAVIDROME_PASS` | unset | Navidrome connection for the Navidrome index source (worker-side) |
+| Metadata | `ENABLE_LYRICS` | `true` | Enable best-effort lyrics lookup/embedding (LRCLIB) during downloads |
+| Metadata | `LRCLIB_BASE_URL` | `https://lrclib.net/api` | LRCLIB endpoint override |
+| Metadata | `ENABLE_GENRE` | `true` | Enable album genre lookup from the iTunes Search API during downloads |
+| Metadata | `ITUNES_LOOKUP_LIMIT` | `3` | Candidate albums to inspect per genre lookup |
 
 ### S3 library index
 
@@ -169,7 +173,7 @@ API — only metadata. To disable cookie-based auth, delete the uploaded file fr
 
 ## Testing
 
-128 pytest tests across all modules (core, API routes, auth, postprocessors, health, cert, cookies). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
+244 pytest tests across all modules (core, API routes, auth, postprocessors, lyrics, genre, index, health, cert, cookies). Module-level mocks isolate all external services (YTMusic, yt-dlp, Celery, Redis, boto3/S3, MariaDB).
 
 ```bash
 # Run full suite
@@ -186,15 +190,23 @@ uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_auth.py` | 17 | API key + OIDC authentication middleware |
+| `test_auth.py` | 29 | API key + OIDC/GitHub authentication middleware |
 | `test_cert.py` | 6 | CA cert resolution, SSL config |
-| `test_core.py` | 20 | S3 path building, search, song download |
+| `test_core.py` | 36 | S3 path building, search, song download, lyrics/genre |
+| `test_download_updates.py` | 2 | Stale job/song error clearing on success |
+| `test_genre.py` | 7 | iTunes genre lookup, matching, env disabled |
 | `test_health.py` | 6 | GET /health, degraded state |
-| `test_postprocessors.py` | 7 | EnrichMeta, UploadToS3 |
-| `test_routes_search.py` | 8 | GET /search, caching, validation |
+| `test_index.py` | 9 | S3/Navidrome library index reconcile |
+| `test_lyrics.py` | 23 | LRCLIB lyrics fetch, retry, timestamp stripping |
+| `test_navidrome.py` | 12 | Navidrome Subsonic API client |
+| `test_postprocessors.py` | 16 | EnrichMeta (tags, cover art, lyrics, genre), UploadToS3 |
+| `test_redis_client.py` | 2 | Valkey-backed cookie store/health helpers |
+| `test_routes_search.py` | 15 | GET /search, caching, validation |
 | `test_routes_download.py` | 11 | POST /download, Celery task dispatch |
-| `test_routes_cookies.py` | 10 | GET/POST /cookies, upload validation |
-| `test_routes_jobs.py` | 13 | GET /jobs, retry logic |
+| `test_routes_cookies.py` | 14 | GET/POST /cookies, upload validation |
+| `test_routes_jobs.py` | 38 | GET /jobs, job groups, retry logic |
+| `test_routes_thumbnail.py` | 10 | GET /thumbnail proxying, cache |
+| `test_scheduler.py` | 8 | Index dispatcher, lock, interval |
 
 The DB layer is replaced with SQLite `:memory:` per test via the `sqlite_db` fixture in `tests/conftest.py`.
 

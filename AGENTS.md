@@ -1,15 +1,15 @@
 # Zimmporter — Music Importer
 
 ## What it is
-Python app that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art, and uploads to an S3-compatible bucket (defined in env vars). Exposed as a FastAPI + Celery API. Jobs and songs tracked in MariaDB.
+Python app that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art + lyrics (LRCLIB) + genre (iTunes), and uploads to an S3-compatible bucket (defined in env vars). Exposed as a FastAPI + Celery API. Jobs and songs tracked in MariaDB.
 
 ## Structure
 ```
-zimmporter/          — core library (cert config, search, download, yt-dlp postprocess)
+zimmporter/          — core library (cert config, search, download, yt-dlp postprocess, lyrics + genre lookup)
 api/                 — FastAPI routes (search, download, jobs, cookies)
 db/                  — SQLAlchemy models + engine (MariaDB)
-tasks/               — Celery tasks (download_album, download_playlist)
-tests/               — pytest suite (128 tests across all modules)
+tasks/               — Celery tasks (download_album, download_playlist, index)
+tests/               — pytest suite (244 tests across all modules)
 ```
 
 ## Usage
@@ -67,6 +67,8 @@ Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API
 - `api/routes/jobs.py` — `GET /jobs/<id>` reads Job + Song rows from DB
 - `api/app.py` — `GET /health` checks API, Valkey connectivity, Celery worker liveness, and MariaDB; always returns HTTP 200 with `"status": "ok"` or `"degraded"` to report partial outages without breaking callers; also purges jobs older than `JOB_RETENTION_DAYS` (default 0 = never purge) and fails stalled jobs via `_fail_stalled_jobs()` (controlled by `JOB_STALLED_TIMEOUT`, default 5m); `AuthMiddleware` adds optional auth (`USE_SIMPLE_AUTH`/`USE_SOCIAL_LOGIN` env vars) to all routes except `/health`
 - `tasks/download.py` — Celery tasks wrap `download_bulk` with `billiard.Pool`. Updates task state per song for progress tracking. Records successfully downloaded albums/playlists into `available_albums` with their `browse_id`.
+- `zimmporter/core.py` download post-processing — best-effort metadata enrichment: album genre from the iTunes Search API via `zimmporter/genre.py` (`ENABLE_GENRE` default true, `ITUNES_LOOKUP_LIMIT` default 3) and per-song lyrics from LRCLIB via `zimmporter/lyrics.py` (`ENABLE_LYRICS` default true, `LRCLIB_BASE_URL`). Genres/lyrics are embedded as standard ID3/MP4 tags; misses never fail a download, and files with no genre have stale genre tags cleared.
+- **Stale errors** — a job's `error` is set to NULL when the task starts (`status=running`), on successful completion, and by `POST /jobs/<id>/retry`; song errors are cleared on successful song retry. A previously failed job never shows a stale error.
 - The S3 library index is triggered from the API pod (`api/scheduler.py`, interval `INDEX_INTERVAL_MINUTES`), not from Celery beat — no beat container/deployment exists.
 - Logger + `YTDL_OPTS` mutated on module level — reinitialized in each forked worker because state is lost after `billiard.Pool` fork
 
@@ -78,4 +80,4 @@ Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API
 - `/` in artist/album/song names is replaced with `-` for S3 paths (`zimmporter/postprocessors.py:98-100`)
 - Concurrent downloads share `YTDL_OPTS` global dict; workers modify `outtmpl` per song
 - Heavy imports (`yt_dlp`, `boto3`, `mutagen`, `billiard.Pool`) are lazy — inside the methods that use them, not at module level. This keeps the API container from needing them at import time.
-- 71 pytest tests covering core, routes, postprocessors, health, cert — run with `uv run python -m pytest tests/`
+- 244 pytest tests covering core, routes, postprocessors, health, cert, lyrics, genre, index — run with `uv run python -m pytest tests/`
