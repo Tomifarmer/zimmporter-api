@@ -6,9 +6,10 @@ pagination via ``limit`` and ``offset`` query parameters.
 """
 
 from fastapi import APIRouter, HTTPException, Request
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from api.models import JobResponse, JobStatsResponse, JobStatusResponse
+from api.user import get_requested_by, get_requested_groups, is_admin
 from db.engine import get_session
 from db.models import Job, Song
 from tasks.download import download_album, download_playlist
@@ -16,12 +17,53 @@ from tasks.download import download_album, download_playlist
 jobs_router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-def _get_requested_by(request: Request) -> str | None:
-    """Extract the requesting user's name from an authenticated request."""
+def _job_visible(job: Job, request: Request) -> bool:
+    """Return ``True`` when the requester may view the given job.
+
+    Visibility rules (mirrored by :func:`_visible_predicates`):
+
+    * Admins and unauthenticated requests see everything.
+    * Jobs with no recorded requester (API-key / pre-OIDC) are public.
+    * A user always sees jobs they requested themselves.
+    * Group members see jobs requested by members of any of their groups.
+    """
     user = request.scope.get("user")
-    if user is None:
-        return None
-    return user.get("name") or user.get("sub")
+    if user is None or is_admin(request):
+        return True
+    if job.requested_by is None:
+        return True
+
+    identity = get_requested_by(request)
+    if identity and job.requested_by == identity:
+        return True
+
+    groups = get_requested_groups(request)
+    if groups and job.requested_groups:
+        viewer = set(groups)
+        stored = {g.strip() for g in job.requested_groups.split(",") if g.strip()}
+        if stored & viewer:
+            return True
+
+    return False
+
+
+def _visible_predicates(request: Request) -> list:
+    """SQLAlchemy predicates selecting jobs the requester is allowed to see.
+
+    Returns an empty list when the requester may see everything (admin or
+    unauthenticated).
+    """
+    user = request.scope.get("user")
+    if user is None or is_admin(request):
+        return []
+
+    predicates = [Job.requested_by.is_(None)]
+    identity = get_requested_by(request)
+    if identity:
+        predicates.append(Job.requested_by == identity)
+    for group in get_requested_groups(request) or []:
+        predicates.append(Job.requested_groups.like(f"%,{group},%"))
+    return predicates
 
 
 def _build_response(job: Job, songs: list) -> dict:
@@ -82,29 +124,28 @@ def get_job_stats(request: Request) -> JobStatsResponse:
     Returns:
         :class:`JobStatsResponse` with global counts.
     """
-    requested_by = _get_requested_by(request)
+    predicates = _visible_predicates(request)
 
     with get_session() as session:
         job_query = session.query(Job)
-        if requested_by:
-            job_query = job_query.filter(Job.requested_by == requested_by)
+        if predicates:
+            job_query = job_query.filter(or_(*predicates))
 
-        status_counts = dict(
-            job_query.with_entities(Job.status, func.count()).group_by(Job.status).all()
-        )
+        status_counts = dict(job_query.with_entities(Job.status, func.count()).group_by(Job.status).all())
 
         song_query = session.query(Song).filter(Song.status == "failed")
-        if requested_by:
-            song_query = song_query.join(Job, Job.id == Song.job_id).filter(
-                Job.requested_by == requested_by
-            )
+        if predicates:
+            song_query = song_query.join(Job, Job.id == Song.job_id).filter(or_(*predicates))
         partial_ids = {job_id for (job_id,) in song_query.with_entities(Song.job_id).distinct().all()}
 
-        success_partial_query = session.query(Song.job_id).filter(Song.status == "failed").join(
-            Job, Job.id == Song.job_id
-        ).filter(Job.status == "success")
-        if requested_by:
-            success_partial_query = success_partial_query.filter(Job.requested_by == requested_by)
+        success_partial_query = (
+            session.query(Song.job_id)
+            .filter(Song.status == "failed")
+            .join(Job, Job.id == Song.job_id)
+            .filter(Job.status == "success")
+        )
+        if predicates:
+            success_partial_query = success_partial_query.filter(or_(*predicates))
         success_partial = success_partial_query.distinct().count()
 
     total = sum(status_counts.values())
@@ -124,23 +165,27 @@ def get_job_stats(request: Request) -> JobStatsResponse:
 
 
 @jobs_router.get("/{job_id}", response_model=JobStatusResponse)
-def get_job_status(job_id: int) -> JobStatusResponse:
+def get_job_status(job_id: int, request: Request) -> JobStatusResponse:
     """Return the status of a specific job with all per-song details.
 
     Args:
         job_id: Database primary key (matches the ``job_id`` returned
             by the POST download endpoints).
+        request: FastAPI request (used to verify group-based access).
 
     Returns:
         Full :class:`JobStatusResponse` with embedded song statuses.
 
     Raises:
-        HTTPException: 404 if the job ID does not exist.
+        HTTPException: 404 if the job does not exist or is not visible
+            to the requesting user.
     """
     with get_session() as session:
         job = session.query(Job).filter(Job.id == job_id).first()
 
         if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if not _job_visible(job, request):
             raise HTTPException(status_code=404, detail="Job not found")
 
         songs = session.query(Song).filter(Song.job_id == job_id).order_by(Song.id.asc()).all()
@@ -157,9 +202,11 @@ def list_jobs(
 ) -> list[JobStatusResponse]:
     """List recent jobs with embedded song statuses.
 
-    When the request is authenticated via OIDC Bearer token, only jobs
-    requested by that user are returned.  Unauthenticated requests (auth
-    disabled or API key) see all jobs.
+    When the request is authenticated via an OIDC Bearer token, only jobs
+    visible to that user are returned: jobs they requested themselves, jobs
+    requested by members of any of their groups, and jobs with no recorded
+    requester.  Unauthenticated requests (auth disabled or API key) see all
+    jobs.
 
     Jobs are returned newest-first (ordered by ``created_at`` descending).
 
@@ -178,20 +225,15 @@ def list_jobs(
     Returns:
         List of :class:`JobStatusResponse` objects.
     """
-    requested_by = _get_requested_by(request)
+    predicates = _visible_predicates(request)
 
     with get_session() as session:
         query = session.query(Job)
-        if requested_by:
-            query = query.filter(Job.requested_by == requested_by)
+        if predicates:
+            query = query.filter(or_(*predicates))
 
         if status in ("success", "partial"):
-            partial_ids = (
-                session.query(Song.job_id)
-                .filter(Song.status == "failed")
-                .distinct()
-                .scalar_subquery()
-            )
+            partial_ids = session.query(Song.job_id).filter(Song.status == "failed").distinct().scalar_subquery()
             if status == "success":
                 query = query.filter(Job.status == "success").filter(~Job.id.in_(partial_ids))
             else:
@@ -203,12 +245,7 @@ def list_jobs(
         elif status == "running":
             query = query.filter(Job.status == "running")
 
-        jobs = (
-            query.order_by(Job.created_at.desc(), Job.id.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        jobs = query.order_by(Job.created_at.desc(), Job.id.desc()).offset(offset).limit(limit).all()
         results = []
         for job in jobs:
             songs = session.query(Song).filter(Song.job_id == job.id).order_by(Song.id.asc()).all()
@@ -235,17 +272,15 @@ def retry_job(job_id: int, request: Request) -> JobResponse:
     Raises:
         HTTPException: 404 if the job does not exist.
         HTTPException: 400 if the job has no failed songs to retry.
-        HTTPException: 403 if the job belongs to a different OIDC user.
+        HTTPException: 403 if the job is not visible to the requesting user.
     """
-    requested_by = _get_requested_by(request)
-
     with get_session() as session:
         job = session.query(Job).filter(Job.id == job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        if requested_by and job.requested_by and job.requested_by != requested_by:
-            raise HTTPException(status_code=403, detail="You do not own this job")
+        if not _job_visible(job, request):
+            raise HTTPException(status_code=403, detail="You do not have access to this job")
 
         failed_songs = session.query(Song).filter(Song.job_id == job_id, Song.status == "failed").all()
         if not failed_songs:
