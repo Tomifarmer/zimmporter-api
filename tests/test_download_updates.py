@@ -1,6 +1,6 @@
 from db.engine import get_session
 from db.models import Song
-from tasks.download import flush_song_updates
+from tasks.download import dict_only_tracks, flush_song_updates
 
 
 def _seed_song(title, status, error):
@@ -68,3 +68,14 @@ def test_failed_song_keeps_error(sqlite_db):
     song = _get_song("bad")
     assert song.status == "failed"
     assert song.error == "HTTP 403 Forbidden"
+
+
+def test_dict_only_tracks_drops_non_dict_entries():
+    tracks = [{"title": "A", "videoId": "v1"}, "malformed", None, 42, {"title": "B"}]
+
+    assert dict_only_tracks(tracks) == [{"title": "A", "videoId": "v1"}, {"title": "B"}]
+
+
+def test_dict_only_tracks_handles_non_list():
+    assert dict_only_tracks(None) == []
+    assert dict_only_tracks("tracks") == []

@@ -36,6 +36,35 @@ class TestUpsertAvailableAlbum:
             row = session.query(AvailableAlbum).first()
             assert row.browse_id == "MPREb_1"
 
+    def test_retries_once_after_concurrent_duplicate_insert(self, sqlite_db, mocker):
+        from sqlalchemy.exc import IntegrityError
+
+        import tasks.index as index_module
+
+        upsert_available_album("Artist", "Album", browse_id="MPREb_keep", track_count=3)
+
+        real_get_session = index_module.get_session
+        failing_session = MagicMock()
+        failing_session.__enter__.return_value = failing_session
+        failing_session.__exit__.side_effect = IntegrityError(
+            "INSERT INTO available_albums ...",
+            {},
+            Exception("Duplicate entry 'Artist-Album' for key 'uq_available_artist_album'"),
+        )
+        mocker.patch.object(
+            index_module,
+            "get_session",
+            side_effect=[failing_session, real_get_session()],
+        )
+
+        upsert_available_album("Artist", "Album", browse_id="MPREb_new", track_count=5)
+
+        with get_session() as session:
+            rows = session.query(AvailableAlbum).all()
+            assert len(rows) == 1
+            assert rows[0].browse_id == "MPREb_new"
+            assert rows[0].track_count == 5
+
 
 class TestScanBucket:
     def test_walks_artist_and_album_prefixes(self):
@@ -143,3 +172,69 @@ class TestNavidromeIndex:
         with get_session() as session:
             row = session.query(AvailableAlbum).filter_by(artist="Artist One", album="Album One").first()
             assert row.browse_id == "MPREb_keep"
+
+    def test_collapses_duplicate_feed_entries(self, sqlite_db, mocker):
+        mocker.patch(
+            "zimmporter.navidrome.get_albums",
+            return_value=[("Artist One", "Album One", 12), ("Artist One", "Album One", 5)],
+        )
+
+        result = _run_navidrome_index()
+
+        assert result["indexed"] == 2
+        assert result["added"] == 1
+        with get_session() as session:
+            rows = session.query(AvailableAlbum).all()
+            assert len(rows) == 1
+            assert rows[0].track_count == 5
+
+    def test_matches_existing_row_case_insensitively(self, sqlite_db, mocker):
+        mocker.patch("zimmporter.navidrome.get_albums", return_value=[("artist one", "album one", 12)])
+
+        upsert_available_album("Artist One", "Album One", browse_id="MPREb_keep")
+
+        result = _run_navidrome_index()
+
+        assert result["added"] == 0
+        assert result["updated"] == 1
+        with get_session() as session:
+            rows = session.query(AvailableAlbum).all()
+            assert len(rows) == 1
+            assert rows[0].browse_id == "MPREb_keep"
+            assert rows[0].track_count == 12
+
+    def test_matches_existing_row_ignoring_trailing_whitespace(self, sqlite_db, mocker):
+        mocker.patch(
+            "zimmporter.navidrome.get_albums",
+            return_value=[("Artist One  ", "Album One  ", 12)],
+        )
+
+        upsert_available_album("Artist One", "Album One", browse_id="MPREb_keep")
+
+        result = _run_navidrome_index()
+
+        assert result["added"] == 0
+        assert result["updated"] == 1
+        with get_session() as session:
+            rows = session.query(AvailableAlbum).all()
+            assert len(rows) == 1
+            assert rows[0].browse_id == "MPREb_keep"
+
+    def test_retries_once_on_concurrent_duplicate_key(self, sqlite_db, mocker):
+        from sqlalchemy.exc import IntegrityError
+
+        import tasks.index as index_module
+
+        mocker.patch("zimmporter.navidrome.get_albums", return_value=[("Artist One", "Album One", 12)])
+        success = {"indexed": 1, "added": 0, "updated": 1, "pruned": 0, "scanned_at": "x"}
+        reconcile = mocker.patch.object(
+            index_module,
+            "_reconcile_found",
+            side_effect=[IntegrityError("t", {}, Exception("duplicate")), success],
+        )
+
+        result = _run_navidrome_index()
+
+        assert reconcile.call_count == 2
+        assert result["indexed"] == 1
+        assert result["added"] == 0

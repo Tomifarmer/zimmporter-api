@@ -20,6 +20,8 @@ import datetime
 import logging
 import os
 
+from sqlalchemy.exc import IntegrityError
+
 from db.engine import get_session
 from db.models import AvailableAlbum
 from tasks.celery_app import celery_app
@@ -87,33 +89,72 @@ def upsert_available_album(
     Used both by :func:`index_albums` (no browse ID) and by download tasks
     (with the exact browse ID).  Failures are logged but swallowed so a flaky
     DB never breaks a download job.
+
+    A bare look-then-create can lose a race: a concurrent writer (an index
+    task running while a download finishes, or a parallel download) may insert
+    the same ``(artist, album)`` between the lookup and the insert.  On such a
+    duplicate-key error the upsert is retried once — by then the racing row is
+    visible, so the retry becomes an update and the ``browse_id``/``track_count``
+    are preserved.
     """
     try:
-        now = datetime.datetime.now(datetime.UTC)
-        with get_session() as session:
-            row = (
-                session.query(AvailableAlbum)
-                .filter(AvailableAlbum.artist == artist, AvailableAlbum.album == album)
-                .first()
-            )
-            if row is None:
-                session.add(
-                    AvailableAlbum(
-                        artist=artist,
-                        album=album,
-                        browse_id=browse_id,
-                        track_count=track_count,
-                        last_seen=now,
-                    )
-                )
-            else:
-                if browse_id:
-                    row.browse_id = browse_id
-                if track_count:
-                    row.track_count = track_count
-                row.last_seen = now
+        _upsert_available_album_row(artist, album, browse_id=browse_id, track_count=track_count)
+    except IntegrityError:
+        logger.info(
+            "Duplicate-key while upserting %s - %s (racing index/download); retrying as update",
+            artist,
+            album,
+        )
+        try:
+            _upsert_available_album_row(artist, album, browse_id=browse_id, track_count=track_count)
+        except Exception as exc:
+            logger.warning("Failed to upsert available album %s - %s: %s", artist, album, exc)
     except Exception as exc:
         logger.warning("Failed to upsert available album %s - %s: %s", artist, album, exc)
+
+
+def _upsert_available_album_row(
+    artist: str,
+    album: str,
+    browse_id: str | None,
+    track_count: int | None,
+) -> None:
+    """Single look-then-create/update pass behind :func:`upsert_available_album`."""
+    now = datetime.datetime.now(datetime.UTC)
+    with get_session() as session:
+        row = (
+            session.query(AvailableAlbum)
+            .filter(AvailableAlbum.artist == artist, AvailableAlbum.album == album)
+            .first()
+        )
+        if row is None:
+            session.add(
+                AvailableAlbum(
+                    artist=artist,
+                    album=album,
+                    browse_id=browse_id,
+                    track_count=track_count,
+                    last_seen=now,
+                )
+            )
+        else:
+            if browse_id:
+                row.browse_id = browse_id
+            if track_count:
+                row.track_count = track_count
+            row.last_seen = now
+
+
+def _normalize_key(value: str) -> str:
+    """Fold a name to the form MariaDB uses for the ``(artist, album)`` uniqueness.
+
+    MariaDB's default ``utf8mb4`` collation treats the unique constraint
+    case-insensitively and ignores trailing whitespace, so Python-side matching
+    must do the same — otherwise the reconcile would ``INSERT`` rows the
+    database already considers duplicates (raising ``IntegrityError`` on
+    commit, failing the index task).
+    """
+    return value.strip().casefold()
 
 
 def _reconcile_available(found) -> dict:
@@ -131,7 +172,22 @@ def _reconcile_available(found) -> dict:
         ``scanned_at`` (ISO timestamp) keys.
     """
     found = list(found)
-    found_keys = {(artist, album) for artist, album, _ in found}
+    try:
+        return _reconcile_found(found)
+    except IntegrityError:
+        logger.info("Duplicate-key while reconciling (racing an in-flight download); retrying once")
+        return _reconcile_found(found)
+
+
+def _reconcile_found(found) -> dict:
+    """Single fresh-snapshot reconcile pass over ``found``.
+
+    Rows are matched on the collation-neutral key (:func:`_normalize_key`) so
+    the case/whitespace of a feed entry aligns with the existing row, and
+    newly-added rows are registered immediately so duplicate entries in
+    ``found`` collapse into one insert instead of a second row.
+    """
+    found_keys = {(_normalize_key(artist), _normalize_key(album)) for artist, album, _ in found}
 
     added: list[str] = []
     updated: list[str] = []
@@ -140,19 +196,22 @@ def _reconcile_available(found) -> dict:
     try:
         with get_session() as session:
             existing = session.query(AvailableAlbum).all()
-            existing_by_key = {(row.artist, row.album): row for row in existing}
+            existing_by_key = {
+                (_normalize_key(row.artist), _normalize_key(row.album)): row for row in existing
+            }
 
             for artist, album, track_count in found:
-                row = existing_by_key.get((artist, album))
+                key = (_normalize_key(artist), _normalize_key(album))
+                row = existing_by_key.get(key)
                 if row is None:
-                    session.add(
-                        AvailableAlbum(
-                            artist=artist,
-                            album=album,
-                            track_count=track_count,
-                            last_seen=now,
-                        )
+                    row = AvailableAlbum(
+                        artist=artist,
+                        album=album,
+                        track_count=track_count,
+                        last_seen=now,
                     )
+                    session.add(row)
+                    existing_by_key[key] = row
                     added.append(f"{artist} - {album}")
                 else:
                     if track_count:
@@ -161,7 +220,7 @@ def _reconcile_available(found) -> dict:
                     updated.append(f"{artist} - {album}")
 
             for row in existing:
-                if (row.artist, row.album) not in found_keys:
+                if (_normalize_key(row.artist), _normalize_key(row.album)) not in found_keys:
                     session.delete(row)
                     pruned.append(f"{row.artist} - {row.album}")
             session.commit()

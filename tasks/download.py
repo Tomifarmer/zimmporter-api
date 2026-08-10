@@ -44,6 +44,18 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 2
 
 
+def dict_only_tracks(tracks) -> list:
+    """Return the dict entries of a ytmusicapi ``tracks`` list.
+
+    ytmusicapi normally returns track items as dicts, but a malformed entry
+    (e.g. a plain string) must never bubble up as ``'str' object has no
+    attribute 'get'`` and kill the whole job.  Non-dict entries are dropped
+    here so every downstream ``song.get(...)``/``song["..."]`` only ever sees
+    well-formed track dicts.
+    """
+    return [t for t in tracks if isinstance(t, dict)] if isinstance(tracks, (list, tuple)) else []
+
+
 def flush_song_updates(session, updates: list[dict]) -> None:
     """Persist a batch of per-song updates in one commit.
 
@@ -171,7 +183,11 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
             with open(thumbnail_path, "wb") as f:
                 f.write(requests.get(thumbnail_url, verify=get_ca_cert()).content)
 
-            tracks = album_data["tracks"]
+            raw_tracks = album_data.get("tracks") or []
+            tracks = dict_only_tracks(raw_tracks)
+            malformed = len(raw_tracks) - len(tracks)
+            if malformed:
+                logger.warning("Skipping %d malformed album track entries (not dicts)", malformed)
             total_tracks = len(tracks)
 
             with get_session() as session:
@@ -335,7 +351,7 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
             with open(cover_path, "wb") as f:
                 f.write(requests.get(playlist_thumb_url, verify=get_ca_cert()).content)
 
-            for song in playlist_data["tracks"]:
+            for song in dict_only_tracks(playlist_data.get("tracks") or []):
                 if song.get("videoId") is None:
                     logger.warning("Skipping song with None videoId: %s", song.get("title", "Unknown"))
                     unavailable.append(song)
