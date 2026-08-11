@@ -35,7 +35,7 @@ from db.engine import get_session, init_db
 from db.models import Song
 from tasks.celery_app import celery_app
 from zimmporter import __version__
-from zimmporter.cert import configure_ssl
+from zimmporter.cert import configure_ssl, get_ssl_context
 
 logger = logging.getLogger("zimmporter.auth")
 if not logger.handlers:
@@ -88,7 +88,7 @@ def _get_jwks_client() -> PyJWKClient | None:
                 logger.error("No jwks_uri in OIDC config response")
                 return None
             logger.info("Found JWKS URI: %s", jwks_uri)
-            _jwks_client = PyJWKClient(jwks_uri, cache_keys=True)
+            _jwks_client = PyJWKClient(jwks_uri, cache_keys=True, ssl_context=get_ssl_context())
         except requests.RequestException as e:
             logger.error("Failed to fetch OIDC config from %s: %s", oidc_config_url, e)
             return None

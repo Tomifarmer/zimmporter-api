@@ -1,8 +1,9 @@
 """Private CA certificate configuration.
 
 Provides helpers for injecting a private CA certificate into all HTTPS clients
-(requests, boto3/S3) via environment variables.  yt-dlp and ytmusicapi
-pick up the cert automatically through ``REQUESTS_CA_BUNDLE``.
+(requests, boto3/S3, urllib-based clients like PyJWKClient) via environment
+variables.  yt-dlp and ytmusicapi pick up the cert automatically through
+``REQUESTS_CA_BUNDLE``.
 
 Set ``CA_CERT`` to the path of a PEM file mounted into the container.  Also set
 ``REQUESTS_CA_BUNDLE`` to the same path for coverage in forked workers.
@@ -13,6 +14,7 @@ back to their default system CA bundle.
 
 import logging
 import os
+import ssl
 
 logger = logging.getLogger("Zimmporter")
 
@@ -50,3 +52,29 @@ def configure_ssl() -> None:
         logger.info(f"Using private CA certificate: {ca}")
     else:
         logger.warning(f"CA_CERT path does not exist ({ca}), falling back to system CA bundle.")
+
+
+def get_ssl_context() -> ssl.SSLContext | None:
+    """Build an ``ssl.SSLContext`` that trusts the private CA certificate.
+
+    Reads the cert path from :func:`get_ca_cert`.  If the file exists,
+    returns a default context with the private CA added to the verified
+    locations, so ``urllib``-based clients (e.g. ``PyJWKClient``) trust
+    servers signed by the private CA.
+
+    If neither env var is set, the file is missing, or it fails to load,
+    logs a warning and returns ``None`` so callers fall back to the
+    default system verification behavior.
+    """
+    ca = get_ca_cert()
+    if ca is None or not os.path.isfile(ca):
+        if ca is not None:
+            logger.warning(f"CA_CERT path does not exist ({ca}), using system CA bundle.")
+        return None
+    try:
+        ctx = ssl.create_default_context()
+        ctx.load_verify_locations(cafile=ca)
+        return ctx
+    except ssl.SSLError as e:
+        logger.warning(f"Failed to load CA certificate {ca}: {e}, using system CA bundle.")
+        return None

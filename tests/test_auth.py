@@ -184,6 +184,55 @@ class TestValidateOidcToken:
         assert _validate_oidc_token("any-token") is None
 
 
+class TestGetJwksClient:
+    """Unit tests for the JWKS client construction in _get_jwks_client."""
+
+    def _reset_jwks_client(self, monkeypatch):
+        import api.app
+
+        monkeypatch.setattr(api.app, "_jwks_client", None)
+
+    def _stub_oidc_config(self, mocker):
+        mock_config = mocker.MagicMock()
+        mock_config.json.return_value = {"jwks_uri": "https://example.com/jwks"}
+        mocker.patch("requests.get", return_value=mock_config)
+        mock_client = mocker.MagicMock()
+        client_cls = mocker.patch("api.app.PyJWKClient", return_value=mock_client)
+        return client_cls, mock_client
+
+    def test_passes_private_ca_ssl_context(self, monkeypatch, mocker):
+        import ssl
+
+        import certifi
+
+        import api.app
+
+        monkeypatch.setenv("USE_SOCIAL_LOGIN", "true")
+        monkeypatch.setenv("OIDC_ISSUER_URL", "https://example.com/oidc")
+        monkeypatch.setenv("CA_CERT", certifi.where())
+        self._reset_jwks_client(monkeypatch)
+        client_cls, mock_client = self._stub_oidc_config(mocker)
+
+        assert api.app._get_jwks_client() is mock_client
+        _, kwargs = client_cls.call_args
+        assert kwargs["cache_keys"] is True
+        assert isinstance(kwargs["ssl_context"], ssl.SSLContext)
+
+    def test_no_ssl_context_without_ca(self, monkeypatch, mocker):
+        import api.app
+
+        monkeypatch.setenv("USE_SOCIAL_LOGIN", "true")
+        monkeypatch.setenv("OIDC_ISSUER_URL", "https://example.com/oidc")
+        monkeypatch.delenv("CA_CERT", raising=False)
+        monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        self._reset_jwks_client(monkeypatch)
+        client_cls, mock_client = self._stub_oidc_config(mocker)
+
+        assert api.app._get_jwks_client() is mock_client
+        _, kwargs = client_cls.call_args
+        assert kwargs["ssl_context"] is None
+
+
 class TestValidateGitHubToken:
     """Unit tests for _validate_github_token directly."""
 
