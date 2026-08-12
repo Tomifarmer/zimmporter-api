@@ -35,7 +35,7 @@ from db.engine import get_session, init_db
 from db.models import Song
 from tasks.celery_app import celery_app
 from zimmporter import __version__
-from zimmporter.cert import configure_ssl, get_ssl_context
+from zimmporter.cert import configure_ssl, get_ca_cert, get_ssl_context
 
 logger = logging.getLogger("zimmporter.auth")
 if not logger.handlers:
@@ -80,15 +80,25 @@ def _get_jwks_client() -> PyJWKClient | None:
             return None
         oidc_config_url = issuer.rstrip("/") + "/.well-known/openid-configuration"
         logger.info("Fetching OIDC config from %s", oidc_config_url)
+        ca_path = get_ca_cert()
+        verify = ca_path if ca_path and os.path.isfile(ca_path) else True
         try:
-            resp = requests.get(oidc_config_url, timeout=10)
+            resp = requests.get(oidc_config_url, timeout=10, verify=verify)
             resp.raise_for_status()
             jwks_uri = resp.json().get("jwks_uri", "")
             if not jwks_uri:
                 logger.error("No jwks_uri in OIDC config response")
                 return None
             logger.info("Found JWKS URI: %s", jwks_uri)
-            _jwks_client = PyJWKClient(jwks_uri, cache_keys=True, ssl_context=get_ssl_context())
+            ssl_ctx = get_ssl_context()
+            if ssl_ctx is None and ca_path is not None:
+                logger.error(
+                    "Private CA is configured (%s) but the SSL context could not be built; "
+                    "PyJWKClient will fall back to the system CA store and may fail to verify "
+                    "the JWKS endpoint.",
+                    ca_path,
+                )
+            _jwks_client = PyJWKClient(jwks_uri, cache_keys=True, ssl_context=ssl_ctx)
         except requests.RequestException as e:
             logger.error("Failed to fetch OIDC config from %s: %s", oidc_config_url, e)
             return None
@@ -190,6 +200,9 @@ def _validate_oidc_token(token: str) -> dict[str, Any] | None:
         return claims
     except jwt.ExpiredSignatureError:
         logger.warning("OIDC token has expired")
+        return None
+    except jwt.PyJWKClientConnectionError as e:
+        logger.warning("OIDC JWKS fetch failed (uri=%s): %s", getattr(client, "uri", "unknown"), e)
         return None
     except jwt.InvalidAudienceError:
         logger.warning("OIDC token audience mismatch (expected %s)", audience)
