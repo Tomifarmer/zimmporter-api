@@ -83,6 +83,7 @@ def upsert_available_album(
     album: str,
     browse_id: str | None = None,
     track_count: int | None = None,
+    genre: str | None = None,
 ) -> None:
     """Create or update a row in ``available_albums``.
 
@@ -98,7 +99,9 @@ def upsert_available_album(
     are preserved.
     """
     try:
-        _upsert_available_album_row(artist, album, browse_id=browse_id, track_count=track_count)
+        _upsert_available_album_row(
+            artist, album, browse_id=browse_id, track_count=track_count, genre=genre
+        )
     except IntegrityError:
         logger.info(
             "Duplicate-key while upserting %s - %s (racing index/download); retrying as update",
@@ -106,7 +109,9 @@ def upsert_available_album(
             album,
         )
         try:
-            _upsert_available_album_row(artist, album, browse_id=browse_id, track_count=track_count)
+            _upsert_available_album_row(
+                artist, album, browse_id=browse_id, track_count=track_count, genre=genre
+            )
         except Exception as exc:
             logger.warning("Failed to upsert available album %s - %s: %s", artist, album, exc)
     except Exception as exc:
@@ -118,6 +123,7 @@ def _upsert_available_album_row(
     album: str,
     browse_id: str | None,
     track_count: int | None,
+    genre: str | None = None,
 ) -> None:
     """Single look-then-create/update pass behind :func:`upsert_available_album`."""
     now = datetime.datetime.now(datetime.UTC)
@@ -134,6 +140,7 @@ def _upsert_available_album_row(
                     album=album,
                     browse_id=browse_id,
                     track_count=track_count,
+                    genre=genre,
                     last_seen=now,
                 )
             )
@@ -142,6 +149,8 @@ def _upsert_available_album_row(
                 row.browse_id = browse_id
             if track_count:
                 row.track_count = track_count
+            if genre:
+                row.genre = genre
             row.last_seen = now
 
 

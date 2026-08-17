@@ -36,6 +36,29 @@ class TestUpsertAvailableAlbum:
             row = session.query(AvailableAlbum).first()
             assert row.browse_id == "MPREb_1"
 
+    def test_stores_genre_on_create(self, sqlite_db):
+        upsert_available_album("Artist", "Album", browse_id="MPREb_1", genre="Electronic")
+
+        with get_session() as session:
+            row = session.query(AvailableAlbum).first()
+            assert row.genre == "Electronic"
+
+    def test_updates_genre_when_provided(self, sqlite_db):
+        upsert_available_album("Artist", "Album", browse_id="MPREb_1")
+        upsert_available_album("Artist", "Album", genre="Dance")
+
+        with get_session() as session:
+            row = session.query(AvailableAlbum).first()
+            assert row.genre == "Dance"
+
+    def test_does_not_overwrite_genre_when_none(self, sqlite_db):
+        upsert_available_album("Artist", "Album", browse_id="MPREb_1", genre="Electronic")
+        upsert_available_album("Artist", "Album")
+
+        with get_session() as session:
+            row = session.query(AvailableAlbum).first()
+            assert row.genre == "Electronic"
+
     def test_retries_once_after_concurrent_duplicate_insert(self, sqlite_db, mocker):
         from sqlalchemy.exc import IntegrityError
 
