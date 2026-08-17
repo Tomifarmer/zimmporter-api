@@ -59,6 +59,17 @@ def migrate_schema() -> None:
                 conn.execute(sa_text(ddl))
         conn.commit()
 
+    status_col = next(
+        (col for col in inspector.get_columns("songs") if col["name"] == "status"), None
+    )
+    if status_col is not None and hasattr(status_col["type"], "enums"):
+        current_enums = list(status_col["type"].enums)
+        if "unavailable" not in current_enums:
+            enum_values = ",".join(f"'{v}'" for v in current_enums + ["unavailable"])
+            with engine.connect() as conn:
+                conn.execute(sa_text(f"ALTER TABLE songs MODIFY COLUMN status ENUM({enum_values}) NOT NULL"))
+                conn.commit()
+
     job_additions = {
         "requested_by": "ALTER TABLE jobs ADD COLUMN requested_by VARCHAR(256) NULL",
         "requested_groups": "ALTER TABLE jobs ADD COLUMN requested_groups VARCHAR(512) NULL",

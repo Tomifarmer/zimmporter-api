@@ -262,6 +262,11 @@ def retry_job(job_id: int, request: Request) -> JobResponse:
     them to ``pending`` (clearing the error), and dispatches the
     original download task again.
 
+    Jobs whose status is ``failed`` are always retryable, even when they
+    hold no song rows (e.g. the run aborted before any songs were
+    inserted); re-queueing the task re-fetches the metadata and
+    re-inserts the songs from scratch.
+
     Args:
         job_id: Database primary key of the job to retry.
         request: FastAPI request (used to verify job ownership).
@@ -271,7 +276,8 @@ def retry_job(job_id: int, request: Request) -> JobResponse:
 
     Raises:
         HTTPException: 404 if the job does not exist.
-        HTTPException: 400 if the job has no failed songs to retry.
+        HTTPException: 400 if the job is not ``failed`` and has no failed
+            songs to retry.
         HTTPException: 403 if the job is not visible to the requesting user.
     """
     with get_session() as session:
@@ -283,7 +289,7 @@ def retry_job(job_id: int, request: Request) -> JobResponse:
             raise HTTPException(status_code=403, detail="You do not have access to this job")
 
         failed_songs = session.query(Song).filter(Song.job_id == job_id, Song.status == "failed").all()
-        if not failed_songs:
+        if not failed_songs and job.status != "failed":
             raise HTTPException(status_code=400, detail="No failed songs to retry")
 
         for song in failed_songs:

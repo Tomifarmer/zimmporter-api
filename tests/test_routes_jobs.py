@@ -474,6 +474,20 @@ class TestRetryJob:
         resp = test_client.post(f"/jobs/{job.id}/retry")
         assert resp.status_code == 400
 
+    def test_retry_allows_failed_job_without_songs(self, test_client, mock_celery_tasks):
+        mock_album_task, _ = mock_celery_tasks
+        with get_session() as session:
+            job = _create_job(session, status="failed", error="Aborted before songs were inserted")
+
+        resp = test_client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 200
+        mock_album_task.assert_called_once()
+
+        with get_session() as session:
+            job = session.query(Job).filter(Job.id == job.id).first()
+            assert job.status == "running"
+            assert job.error is None
+
     def test_retry_returns_404_for_missing_job(self, test_client):
         resp = test_client.post("/jobs/99999/retry")
         assert resp.status_code == 404

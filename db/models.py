@@ -99,7 +99,8 @@ class Song(Base):
         artist: Artist name (or ``"playlists"`` for playlist songs).
         album: Album or playlist title.
         track_number: Track index (``None`` for playlists).
-        status: ``pending``, ``downloading``, ``success``, or ``failed``.
+        status: ``pending``, ``downloading``, ``success``, ``failed``, or
+            ``unavailable`` (playlist tracks with no video ID).
         s3_path: S3 object key after successful upload.
         error: Exception message if download or upload failed.
         created_at: UTC timestamp of row creation.
@@ -115,7 +116,7 @@ class Song(Base):
     album = Column(String(512), nullable=False)
     track_number = Column(Integer, nullable=True)
     status = Column(
-        Enum("pending", "downloading", "success", "failed", name="song_status_enum"),
+        Enum("pending", "downloading", "success", "failed", "unavailable", name="song_status_enum"),
         nullable=False,
         default="pending",
     )
