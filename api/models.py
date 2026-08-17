@@ -93,6 +93,91 @@ class JobResponse(BaseModel):
     status: str
 
 
+class JobTypeCounts(BaseModel):
+    """Album vs playlist job counts (the download-type ratio).
+
+    Attributes:
+        album: Number of jobs of type ``album``.
+        playlist: Number of jobs of type ``playlist``.
+    """
+
+    album: int = 0
+    playlist: int = 0
+
+
+class JobStatsAggregate(BaseModel):
+    """Job-level aggregates for the stats overview.
+
+    Attributes:
+        total: Total number of jobs.
+        by_status: Count of jobs per ``status`` value.
+        by_type: Album vs playlist job counts.
+    """
+
+    total: int = 0
+    by_status: dict[str, int] = {}
+    by_type: JobTypeCounts = JobTypeCounts()
+
+
+class LibraryStats(BaseModel):
+    """Library size from the ``available_albums`` index.
+
+    Attributes:
+        albums: Number of album entries (artist not ``"playlists"``).
+        playlists: Number of playlist entries.
+        artists: Number of distinct album artists (playlists excluded).
+        tracks: Total track count across all entries.
+    """
+
+    albums: int = 0
+    playlists: int = 0
+    artists: int = 0
+    tracks: int = 0
+
+
+class GenreCount(BaseModel):
+    """A genre bucket and the number of albums carrying it.
+
+    Attributes:
+        genre: The album genre name.
+        count: Number of albums with that genre.
+    """
+
+    genre: str
+    count: int
+
+
+class TopUserCount(BaseModel):
+    """A user's download activity (social-login jobs only).
+
+    Attributes:
+        user: The ``requested_by`` name/sub of the OIDC user.
+        jobs: Number of jobs requested by that user.
+        tracks: Number of successfully downloaded songs across those jobs.
+    """
+
+    user: str
+    jobs: int = 0
+    tracks: int = 0
+
+
+class StatsResponse(BaseModel):
+    """Aggregate stats for the frontend ``/stats`` tab.
+
+    Attributes:
+        jobs: Job-level aggregates (total, status, album/playlist ratio).
+        library: Library size from the ``available_albums`` index.
+        genres: Genre distribution over albums, sorted by count descending.
+        top_users: Most active social-login users, sorted by job count
+            descending.
+    """
+
+    jobs: JobStatsAggregate
+    library: LibraryStats
+    genres: list[GenreCount] = []
+    top_users: list[TopUserCount] = []
+
+
 class SongStatusResponse(BaseModel):
     """Per-song status embedded in :class:`JobStatusResponse`.
 

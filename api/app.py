@@ -29,6 +29,7 @@ from api.routes.cookies import cookies_router
 from api.routes.download import download_router
 from api.routes.jobs import jobs_router
 from api.routes.search import search_router
+from api.routes.stats import stats_router
 from api.routes.thumbnail import thumbnail_router
 from api.scheduler import run_index_scheduler
 from db.engine import get_session, init_db
@@ -60,6 +61,7 @@ app.include_router(download_router)
 app.include_router(jobs_router)
 app.include_router(thumbnail_router)
 app.include_router(cookies_router)
+app.include_router(stats_router)
 
 
 # ── JWKS cache ──────────────────────────────────────────────────────────────

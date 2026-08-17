@@ -82,6 +82,17 @@ def migrate_schema() -> None:
                 conn.execute(sa_text(ddl))
         conn.commit()
 
+    album_additions = {
+        "genre": "ALTER TABLE available_albums ADD COLUMN genre VARCHAR(128) NULL",
+    }
+
+    existing_album_columns = {col["name"] for col in inspector.get_columns("available_albums")}
+    with engine.connect() as conn:
+        for col, ddl in album_additions.items():
+            if col not in existing_album_columns:
+                conn.execute(sa_text(ddl))
+        conn.commit()
+
 
 @contextmanager
 def get_session():

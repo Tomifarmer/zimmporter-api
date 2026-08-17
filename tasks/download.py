@@ -280,7 +280,7 @@ def download_album(self, ids: str, concurrent: int = 4) -> dict:
                     )
                     .count()
                 )
-            upsert_available_album(artist, album_name, browse_id=id, track_count=success_count)
+            upsert_available_album(artist, album_name, browse_id=id, track_count=success_count, genre=genre)
 
         with get_session() as session:
             _update_job(

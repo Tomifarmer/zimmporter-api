@@ -141,6 +141,8 @@ class AvailableAlbum(Base):
         album: Album or playlist title.
         browse_id: YT Music browse ID recorded from a successful download
             job (``None`` when only discovered via the S3 scan).
+        genre: Album genre resolved from the iTunes Search API at download
+            time (``None`` when unknown/disabled or for playlists).
         track_count: Number of tracks detected in S3 (``None`` when unknown).
         last_seen: UTC timestamp of the most recent index run that observed
             this entry; used to prune albums removed from S3.
@@ -154,6 +156,7 @@ class AvailableAlbum(Base):
     artist = Column(String(512), nullable=False)
     album = Column(String(512), nullable=False)
     browse_id = Column(String(512), nullable=True, index=True)
+    genre = Column(String(128), nullable=True)
     track_count = Column(Integer, nullable=True)
     last_seen = Column(
         DateTime(3),
