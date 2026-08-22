@@ -68,7 +68,7 @@ Client (curl / UI)
 | `routes/thumbnail.py` | `GET /thumbnail?url=` — proxies thumbnail from CDN through the API, cached in db 3 (24 h TTL), excluded from auth middleware |
 | `routes/cookies.py` | `GET /cookies` (metadata) and `POST /cookies` (multipart upload) manage the yt-dlp cookies file; validated, written atomically into `COOKIE_DIR`; contents never exposed |
 | `routes/download.py` | `POST /download/{album\|playlist}` — DB Job row first, then Celery task dispatch |
-| `routes/jobs.py` | `GET /jobs/{id}` and `GET /jobs` — job/song status from MariaDB |
+| `routes/jobs.py` | `GET /jobs/{id}`, `GET /jobs`, `DELETE /jobs/{id}` — job/song status from MariaDB; delete restricted to admins/owners when social login is enabled |
 
 ### `db/` - Database Layer
 

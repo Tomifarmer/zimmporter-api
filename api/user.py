@@ -49,6 +49,14 @@ def get_requested_groups_delimited(request: Request) -> str | None:
     return "," + ",".join(groups) + ","
 
 
+def social_login_enabled() -> bool:
+    """Return ``True`` when social (Bearer token) login mode is active.
+
+    Mirrors the ``USE_SOCIAL_LOGIN`` check in :class:`api.app.AuthMiddleware`.
+    """
+    return os.environ.get("USE_SOCIAL_LOGIN", "").lower() == "true"
+
+
 def _admin_groups() -> set[str]:
     """Groups allowed to bypass the per-group job filter.
 
