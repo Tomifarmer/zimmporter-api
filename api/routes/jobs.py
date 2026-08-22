@@ -1,15 +1,17 @@
-"""Job status routes — ``GET /jobs/{job_id}`` and ``GET /jobs``.
+"""Job status routes — ``GET /jobs/{job_id}``, ``GET /jobs`` and ``DELETE /jobs/{job_id}``.
 
 Reads from the MariaDB ``jobs`` and ``songs`` tables to return the
 current state of download jobs.  The ``GET /jobs`` endpoint supports
-pagination via ``limit`` and ``offset`` query parameters.
+pagination via ``limit`` and ``offset`` query parameters, and jobs can
+be deleted manually via ``DELETE /jobs/{job_id}`` (admin/owner only
+when social login is enabled).
 """
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import func, or_
 
 from api.models import JobResponse, JobStatsResponse, JobStatusResponse
-from api.user import get_requested_by, get_requested_groups, is_admin
+from api.user import get_requested_by, get_requested_groups, is_admin, social_login_enabled
 from db.engine import get_session
 from db.models import Job, Song
 from tasks.download import download_album, download_playlist
@@ -66,12 +68,30 @@ def _visible_predicates(request: Request) -> list:
     return predicates
 
 
-def _build_response(job: Job, songs: list) -> dict:
+def _can_delete(job: Job, request: Request) -> bool:
+    """Return ``True`` when the requester may delete the given job.
+
+    Deletion rules:
+
+    * Without social login (API key / auth disabled) anyone may delete.
+    * With social login, admins may delete any job and regular users
+      may only delete jobs they requested themselves.
+    """
+    if not social_login_enabled():
+        return True
+    if is_admin(request):
+        return True
+    identity = get_requested_by(request)
+    return bool(identity) and job.requested_by == identity
+
+
+def _build_response(job: Job, songs: list, request: Request) -> dict:
     """Convert a :class:`db.models.Job` and its :class:`db.models.Song`\'s into a response model.
 
     Args:
         job: Database Job row.
         songs: Related Song rows, ordered by id ascending.
+        request: FastAPI request (used to compute the ``can_delete`` flag).
 
     Returns:
         Populated :class:`JobStatusResponse`.
@@ -94,6 +114,7 @@ def _build_response(job: Job, songs: list) -> dict:
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "updated_at": job.updated_at.isoformat() if job.updated_at else None,
         "songs_downloaded": sum(1 for s in songs if s.status == "success"),
+        "can_delete": _can_delete(job, request),
         "songs": [
             {
                 "id": s.id,
@@ -190,7 +211,7 @@ def get_job_status(job_id: int, request: Request) -> JobStatusResponse:
 
         songs = session.query(Song).filter(Song.job_id == job_id).order_by(Song.id.asc()).all()
 
-        return JobStatusResponse(**_build_response(job, songs))
+        return JobStatusResponse(**_build_response(job, songs, request))
 
 
 @jobs_router.get("", response_model=list[JobStatusResponse])
@@ -249,7 +270,7 @@ def list_jobs(
         results = []
         for job in jobs:
             songs = session.query(Song).filter(Song.job_id == job.id).order_by(Song.id.asc()).all()
-            results.append(JobStatusResponse(**_build_response(job, songs)))
+            results.append(JobStatusResponse(**_build_response(job, songs, request)))
 
     return results
 
@@ -307,3 +328,42 @@ def retry_job(job_id: int, request: Request) -> JobResponse:
     task.apply_async(args=[browse_id], kwargs={"concurrent": 4}, task_id=str(job_id))
 
     return JobResponse(job_id=job_id, status="running")
+
+
+@jobs_router.delete("/{job_id}", response_model=JobResponse)
+def delete_job(job_id: int, request: Request) -> JobResponse:
+    """Manually delete a job and its songs.
+
+    The delete is permanent: the job row and all related song rows are
+    removed (songs cascade via the ORM relationship).  Deleting a job
+    whose download is still pending or running does not cancel the
+    background work — the Celery task keeps running but its progress
+    updates become no-ops once the rows are gone.
+
+    Deletion rules (see :func:`_can_delete`): without social login any
+    authenticated caller may delete; with social login only admins
+    (``JOB_ADMIN_GROUPS``) or the requesting user themselves.
+
+    Args:
+        job_id: Database primary key of the job to delete.
+        request: FastAPI request (used to verify deletion permission).
+
+    Returns:
+        The ``job_id`` with the status ``"deleted"``.
+
+    Raises:
+        HTTPException: 404 if the job does not exist.
+        HTTPException: 403 if the requester is not allowed to delete.
+    """
+    with get_session() as session:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        if not _can_delete(job, request):
+            raise HTTPException(status_code=403, detail="You are not allowed to delete this job")
+
+        session.delete(job)
+        session.commit()
+
+    return JobResponse(job_id=job_id, status="deleted")

@@ -505,3 +505,124 @@ class TestRetryJob:
             job = session.query(Job).filter(Job.id == job.id).first()
             assert job.status == "running"
             assert job.error is None
+
+
+class TestDeleteJob:
+    def _auth(self, monkeypatch, mocker, **kwargs):
+        _oidc_auth(monkeypatch, mocker, **kwargs)
+        return {"Authorization": "Bearer test-token"}
+
+    def test_delete_removes_job_and_songs(self, test_client):
+        with get_session() as session:
+            job = _create_job(session)
+            _create_song(session, job.id, title="S1")
+            _create_song(session, job.id, title="S2")
+
+        resp = test_client.delete(f"/jobs/{job.id}")
+        assert resp.status_code == 200
+        assert resp.json() == {"job_id": job.id, "status": "deleted"}
+
+        with get_session() as session:
+            assert session.query(Job).filter(Job.id == job.id).first() is None
+            assert session.query(Song).filter(Song.job_id == job.id).all() == []
+
+    def test_delete_returns_404_for_missing_job(self, test_client):
+        resp = test_client.delete("/jobs/99999")
+        assert resp.status_code == 404
+
+    def test_delete_without_social_login_allows_any_job(self, test_client):
+        with get_session() as session:
+            job = _create_job(session, requested_by="Octocat")
+
+        resp = test_client.delete(f"/jobs/{job.id}")
+        assert resp.status_code == 200
+
+    def test_delete_owner_can_delete_own_job(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Fan", groups=["SEB"])
+        with get_session() as session:
+            own = _create_job(session, requested_by="Fan", requested_groups=",SEB,")
+            _create_song(session, own.id, title="S1")
+
+        resp = test_client.delete(f"/jobs/{own.id}", headers=headers)
+        assert resp.status_code == 200
+
+        with get_session() as session:
+            assert session.query(Song).filter(Song.job_id == own.id).all() == []
+
+    def test_delete_forbidden_for_other_user(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Fan", groups=["SEB"])
+        with get_session() as session:
+            other = _create_job(session, requested_by="Someone", requested_groups=",SEB,")
+
+        resp = test_client.delete(f"/jobs/{other.id}", headers=headers)
+        assert resp.status_code == 403
+
+    def test_delete_forbidden_for_group_member_who_is_not_owner(
+        self, test_client, monkeypatch, mocker
+    ):
+        headers = self._auth(monkeypatch, mocker, name="Bystander", groups=["SEB"])
+        with get_session() as session:
+            job = _create_job(session, requested_by="Owner", requested_groups=",SEB,")
+
+        resp = test_client.delete(f"/jobs/{job.id}", headers=headers)
+        assert resp.status_code == 403
+
+    def test_delete_admin_can_delete_any_job(self, test_client, monkeypatch, mocker):
+        monkeypatch.setenv("JOB_ADMIN_GROUPS", "IBR")
+        headers = self._auth(monkeypatch, mocker, name="Overlord", groups=["IBR"])
+        with get_session() as session:
+            job = _create_job(session, requested_by="B", requested_groups=",SEB,")
+
+        resp = test_client.delete(f"/jobs/{job.id}", headers=headers)
+        assert resp.status_code == 200
+
+    def test_delete_forbidden_for_user_without_groups(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Loner")
+        with get_session() as session:
+            job = _create_job(session, requested_by="Someone")
+
+        resp = test_client.delete(f"/jobs/{job.id}", headers=headers)
+        assert resp.status_code == 403
+
+
+class TestCanDeleteFlag:
+    """Tests for the ``can_delete`` flag returned with each job."""
+
+    def _auth(self, monkeypatch, mocker, **kwargs):
+        _oidc_auth(monkeypatch, mocker, **kwargs)
+        return {"Authorization": "Bearer test-token"}
+
+    def test_flag_true_for_everyone_without_social_login(self, test_client):
+        with get_session() as session:
+            _create_job(session, browse_id="a", requested_by="Octocat")
+
+        data = test_client.get("/jobs").json()
+        assert data[0]["can_delete"] is True
+
+    def test_flag_true_for_own_job_in_social_mode(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Fan", groups=["SEB"])
+        with get_session() as session:
+            _create_job(session, browse_id="own", requested_by="Fan", requested_groups=",SEB,")
+
+        data = test_client.get("/jobs", headers=headers).json()
+        assert data[0]["browse_id"] == "own"
+        assert data[0]["can_delete"] is True
+
+    def test_flag_false_for_foreign_job_in_social_mode(self, test_client, monkeypatch, mocker):
+        headers = self._auth(monkeypatch, mocker, name="Fan", groups=["SEB"])
+        with get_session() as session:
+            foreign = _create_job(session, browse_id="sys", requested_by=None)
+
+        detail = test_client.get(f"/jobs/{foreign.id}", headers=headers).json()
+        assert detail["can_delete"] is False
+
+    def test_flag_true_for_admin_on_any_job(self, test_client, monkeypatch, mocker):
+        monkeypatch.setenv("JOB_ADMIN_GROUPS", "IBR")
+        headers = self._auth(monkeypatch, mocker, name="Overlord", groups=["IBR"])
+        with get_session() as session:
+            job = _create_job(session, browse_id="seb", requested_by="B", requested_groups=",SEB,")
+
+        listing = test_client.get("/jobs", headers=headers).json()
+        detail = test_client.get(f"/jobs/{job.id}", headers=headers).json()
+        assert listing[0]["can_delete"] is True
+        assert detail["can_delete"] is True

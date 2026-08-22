@@ -226,6 +226,7 @@ class JobStatusResponse(BaseModel):
         created_at: UTC datetime when the job was created.
         updated_at: Last UTC update timestamp.
         songs_downloaded: Count of songs with status ``"success"``.
+        can_delete: Whether the requesting user is allowed to delete this job.
         songs: Per-song status details.
     """
 
@@ -246,4 +247,5 @@ class JobStatusResponse(BaseModel):
     created_at: dt.datetime | None = None
     updated_at: dt.datetime | None = None
     songs_downloaded: int = Field(default=0, description="Number of songs with status ``success``")
+    can_delete: bool = False
     songs: list[SongStatusResponse] = []
