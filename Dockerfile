@@ -1,6 +1,6 @@
-FROM docker.io/python:3.14.6-slim-trixie
+FROM docker.io/python:3.15.2-slim-trixie
 
-COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
 RUN apt update && apt upgrade --no-install-recommends -y && \
     apt install --no-install-recommends ca-certificates libexpat1 -y && \

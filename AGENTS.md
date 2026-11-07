@@ -42,7 +42,7 @@ curl -s "http://localhost:8000/health" | jq .
 Two optional auth methods: set `USE_SIMPLE_AUTH=true` to require API key (`X-API-Key` header matching `API_KEY`), or set `USE_SOCIAL_LOGIN=true` to require a Bearer token (`Authorization: Bearer <JWT>` validated against `OIDC_ISSUER_URL`/`OIDC_CLIENT_ID`, or a GitHub token validated against the GitHub API). Either suffices when both are enabled.
 
 ## Runtime requirements
-- **Python 3.14+**, dependencies split across requirement files:
+- **Python 3.15+**, dependencies split across requirement files:
   - `requirements.txt` — API container (FastAPI, uvicorn + `requirements-base.txt`)
   - `requirements-base.txt` — shared minimal deps (ytmusicapi, celery, sqlalchemy, pymysql, requests)
   - `requirements-worker.txt` — worker container (same as base + yt-dlp, boto3, mutagen)

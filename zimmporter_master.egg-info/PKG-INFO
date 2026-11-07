@@ -2,7 +2,7 @@ Metadata-Version: 2.4
 Name: zimmporter-master
 Version: 1.1.1.dev8+gcbfb60ca6.d20261031
 Summary: Add your description here
-Requires-Python: >=3.14
+Requires-Python: >=3.15
 Requires-Dist: celery[redis]<6.0,>=5.6.3
 Requires-Dist: fastapi<1.0,>=0.162.0
 Requires-Dist: boto3>=1.43.123
