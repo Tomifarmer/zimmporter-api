@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "zimmporter-master"
 dynamic = ["version"]
 description = "Add your description here"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
     "celery[redis]>=5.6.3,<6.0",
     "fastapi>=0.162.0,<1.0",
