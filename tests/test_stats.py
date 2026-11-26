@@ -68,7 +68,7 @@ class TestStats:
         assert data["jobs"]["by_status"]["failed"] == 1
         assert data["jobs"]["by_status"]["pending"] == 1
         assert data["jobs"]["by_status"]["running"] == 1
-        assert data["jobs"]["by_type"] == {"album": 3, "playlist": 2}
+        assert data["jobs"]["by_type"] == {"album": 3, "playlist": 2, "single": 0}
 
         assert data["library"] == {
             "albums": 4,
@@ -123,7 +123,7 @@ class TestStats:
         resp = test_client.get("/stats", headers={"Authorization": "Bearer test-token"})
         data = resp.json()
         assert data["jobs"]["total"] == 1
-        assert data["jobs"]["by_type"] == {"album": 1, "playlist": 0}
+        assert data["jobs"]["by_type"] == {"album": 1, "playlist": 0, "single": 0}
 
     def test_top_users_lists_most_active_social_users(self, test_client, mocker):
         mocker.patch("api.routes.stats._lookup_genre", return_value="Pop")
@@ -154,8 +154,22 @@ class TestStats:
         assert data["jobs"] == {
             "total": 0,
             "by_status": {},
-            "by_type": {"album": 0, "playlist": 0},
+            "by_type": {"album": 0, "playlist": 0, "single": 0},
         }
         assert data["library"] == {"albums": 0, "playlists": 0, "artists": 0, "tracks": 0}
         assert data["genres"] == []
         assert data["top_users"] == []
+
+    def test_singles_excluded_from_album_counts_but_tracks_counted(self, test_client, mocker):
+        mocker.patch("api.routes.stats._lookup_genre", return_value="Pop")
+        with get_session() as session:
+            _seed_job(session, job_type="single", status="success")
+            _seed_album(session, "Artist A", "Album 1", genre="Electronic", track_count=10)
+            _seed_album(session, "Artist A", "Singles", track_count=3)
+
+        resp = test_client.get("/stats")
+        data = resp.json()
+        assert data["jobs"]["by_type"]["single"] == 1
+        assert data["library"]["albums"] == 1
+        assert data["library"]["artists"] == 1
+        assert data["library"]["tracks"] == 13

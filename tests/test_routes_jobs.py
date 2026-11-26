@@ -466,6 +466,19 @@ class TestRetryJob:
         test_client.post(f"/jobs/{job.id}/retry")
         mock_album_task.assert_called_once()
 
+    def test_retry_single_dispatches_download_single(self, test_client, mock_single_task):
+        with get_session() as session:
+            job = _create_job(
+                session, job_type="single", browse_id="vid_song_001", status="running"
+            )
+            _create_song(session, job.id, status="failed", error="err")
+
+        resp = test_client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 200
+        mock_single_task.assert_called_once()
+        _, kwargs = mock_single_task.call_args
+        assert kwargs["args"] == ["vid_song_001"]
+
     def test_retry_returns_400_when_no_failed_songs(self, test_client):
         with get_session() as session:
             job = _create_job(session)

@@ -20,14 +20,20 @@ class SearchResponse(BaseModel):
 
 
 class DownloadRequest(BaseModel):
-    """Request body for ``POST /download/album`` and ``POST /download/playlist``.
+    """Request body for the download endpoints.
+
+    Used by ``POST /download/album``, ``POST /download/playlist``, and
+    ``POST /download/single``.
 
     Attributes:
-        id: Browse ID or comma-separated IDs (e.g. ``MPREb_xxx``).
+        id: Browse ID or video ID, or comma-separated IDs (e.g. ``MPREb_xxx``).
         concurrent: Number of parallel download workers (1-32, default 4).
     """
 
-    id: str = Field(..., description="Album or Playlist browse ID (comma-separated for multiple)")
+    id: str = Field(
+        ...,
+        description="Album/Playlist browse ID or song video ID (comma-separated for multiple)",
+    )
     concurrent: int = Field(default=4, ge=1, le=32, description="Number of concurrent download workers")
 
 
@@ -94,15 +100,17 @@ class JobResponse(BaseModel):
 
 
 class JobTypeCounts(BaseModel):
-    """Album vs playlist job counts (the download-type ratio).
+    """Album vs playlist vs single job counts (the download-type ratio).
 
     Attributes:
         album: Number of jobs of type ``album``.
         playlist: Number of jobs of type ``playlist``.
+        single: Number of jobs of type ``single``.
     """
 
     album: int = 0
     playlist: int = 0
+    single: int = 0
 
 
 class JobStatsAggregate(BaseModel):
@@ -111,7 +119,7 @@ class JobStatsAggregate(BaseModel):
     Attributes:
         total: Total number of jobs.
         by_status: Count of jobs per ``status`` value.
-        by_type: Album vs playlist job counts.
+        by_type: Album vs playlist vs single job counts.
     """
 
     total: int = 0
@@ -123,9 +131,9 @@ class LibraryStats(BaseModel):
     """Library size from the ``available_albums`` index.
 
     Attributes:
-        albums: Number of album entries (artist not ``"playlists"``).
+        albums: Number of album entries (playlists and singles excluded).
         playlists: Number of playlist entries.
-        artists: Number of distinct album artists (playlists excluded).
+        artists: Number of distinct artists (playlists excluded).
         tracks: Total track count across all entries.
     """
 

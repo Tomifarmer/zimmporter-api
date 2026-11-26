@@ -264,6 +264,74 @@ class TestDownloadAlbumSong:
         assert enrich.metadata["genre"] is None
 
 
+class TestDownloadSingleSong:
+    def test_returns_correct_dict_shape(self):
+        result = Zimmporter.download_single_song(
+            {"title": "Track One", "videoId": "vid1"},
+            "Artist",
+            "/fake/cover.jpg",
+            year="2024",
+            thread_id=1,
+        )
+        assert result["title"] == "Track One"
+        assert result["artist"] == "Artist"
+        assert result["album"] == "Singles"
+        assert result["track_number"] is None
+        assert result["status"] == "success"
+        assert result["s3_path"] == "Artist/Singles/Track One.m4a"
+        assert result["error"] is None
+
+    def test_s3_path_with_slashes(self):
+        result = Zimmporter.download_single_song(
+            {"title": "Song / Title", "videoId": "vid1"},
+            "Artist / Name",
+            "/fake/cover.jpg",
+            thread_id=1,
+        )
+        assert result["s3_path"] == "Artist - Name/Singles/Song - Title.m4a"
+
+    def test_metadata_uses_singles_album_and_year(self, mocker):
+        mocker.patch("zimmporter.core._fetch_lyrics", return_value="la la la")
+        mock_ydl = mocker.patch("yt_dlp.YoutubeDL")
+        mock_ydl_context = MagicMock()
+        mock_ydl_instance = MagicMock()
+        mock_ydl_context.__enter__.return_value = mock_ydl_instance
+        mock_ydl.return_value = mock_ydl_context
+
+        Zimmporter.download_single_song(
+            {"title": "Track One", "videoId": "vid1"},
+            "Artist",
+            "/fake/cover.jpg",
+            year=2024,
+            thread_id=1,
+        )
+
+        enrich = mock_ydl_instance.add_post_processor.call_args_list[0][0][0]
+        assert enrich.metadata["album"] == "Singles"
+        assert enrich.metadata["date"] == "2024"
+        assert enrich.metadata["lyrics"] == "la la la"
+        assert "tracknumber" not in enrich.metadata
+
+    def test_returns_error_on_failure(self, mocker):
+        mocker.patch("zimmporter.core.RETRY_DELAY", 0)
+        mocker.patch("zimmporter.core.MAX_RETRIES", 2)
+        mock_ydl = mocker.patch("yt_dlp.YoutubeDL")
+        mock_ydl_context = MagicMock()
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.download.side_effect = Exception("Download failed")
+        mock_ydl_context.__enter__.return_value = mock_ydl_instance
+        mock_ydl.return_value = mock_ydl_context
+
+        result = Zimmporter.download_single_song(
+            {"title": "Track One", "videoId": "vid1"},
+            "Artist",
+            "/fake/cover.jpg",
+            thread_id=1,
+        )
+        assert result["status"] == "failed"
+        assert "Download failed" in result["error"]
+
+
 class TestDownloadBulk:
     def test_albums_lookup_genre_once_per_album(self, mocker, tmp_path):
         mocker.patch("zimmporter.core.temp_dir", f"{tmp_path}/")

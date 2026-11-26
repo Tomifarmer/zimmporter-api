@@ -1,6 +1,6 @@
 # Zimmporter
 
-Music importer API that searches YouTube Music, downloads albums/playlists, converts to AAC, embeds metadata + cover art + lyrics (LRCLIB) + genre (iTunes), and uploads to an S3-compatible bucket. Backed by FastAPI + Celery with MariaDB for job tracking.
+Music importer API that searches YouTube Music, downloads albums/playlists/individual tracks, converts to AAC, embeds metadata + cover art + lyrics (LRCLIB) + genre (iTunes), and uploads to an S3-compatible bucket. Backed by FastAPI + Celery with MariaDB for job tracking.
 
 ## Getting started
 
@@ -14,9 +14,10 @@ Then open the Swagger UI at http://localhost:8000/docs or try the API directly.
 
 ### Endpoints
 
-- **`GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes. Each result includes an `available` boolean flagging albums/playlists already present in the S3 library index (refreshed regularly by the periodic library index scan).
+- **`GET /search?q=<query>&type=<albums|songs|featured_playlists|community_playlists>&limit=10`** — Search YouTube Music and return structured result dicts. Results are cached in Valkey for 5 minutes. Each result includes an `available` boolean flagging items already present in the library (albums/playlists from the S3 library index, songs from successful downloads).
 - **`POST /download/album`** — Queue one or more albums (`id: "MPREb_xxx,MPREb_yyy"`) with concurrency (`concurrent`: 1–32). Returns `job_id`.
 - **`POST /download/playlist`** — Queue one or more playlists. Same flow as album download.
+- **`POST /download/single`** — Queue one or more individual tracks (`id` = YouTube Music `videoId`). Stored at `{artist}/Singles/{title}.m4a`.
 - **`GET /jobs/<id>`** — Poll a specific job for per-song progress.
 - **`GET /jobs?limit=50&offset=0`** — List recent jobs newest-first, paginated.
 - **`GET /cookies`** — Cookie file metadata (exists, size, cookie count, domains, last updated). Never returns cookie contents.
@@ -113,7 +114,7 @@ Client (curl / UI)
 Two levels of parallelism:
 
 1. **Celery level**: One task per job, multiple worker processes can run in parallel.
-2. **Pool level**: Within a single album/playlist, each pool child downloads and converts one song at a time via yt-dlp + ffmpegAAC conversion + S3 upload.
+2. **Pool level**: Within a single album/playlist/single, each pool child downloads and converts one song at a time via yt-dlp + ffmpegAAC conversion + S3 upload.
 
 ### Environment Variables
 
@@ -149,7 +150,7 @@ runs on a **worker** (which has boto3 + the S3 credentials), scans the S3 bucket
 `{artist}/{album}/` prefix; the `tasks.index_navidrome` task queries a Navidrome server's Subsonic API
 (`getAlbumList2`) for the albums it has indexed — a tag-accurate view of the same library. Both write to the
 `available_albums` table. Successful download jobs also record the exact YT Music `browse_id`, so
-`GET /search` can flag already-imported albums/playlists via an `available` field (matched by browse
+`GET /search` can flag already-imported albums/playlists/songs via an `available` field (matched by browse
 ID or normalized artist + title). Entries no longer present in the library are pruned automatically. A Valkey
 lock in the API scheduler de-duplicates the dispatch when the API runs with multiple replicas — no
 separate Celery beat container is needed.
@@ -190,23 +191,24 @@ uv run python -m pytest tests/ --cov=zimmporter --cov=api --cov=db --cov=tasks
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_auth.py` | 29 | API key + OIDC/GitHub authentication middleware |
-| `test_cert.py` | 6 | CA cert resolution, SSL config |
-| `test_core.py` | 36 | S3 path building, search, song download, lyrics/genre |
-| `test_download_updates.py` | 2 | Stale job/song error clearing on success |
+| `test_auth.py` | 31 | API key + OIDC/GitHub authentication middleware |
+| `test_cert.py` | 14 | CA cert resolution, SSL config |
+| `test_core.py` | 40 | S3 path building, search, song/single download, lyrics/genre |
+| `test_download_updates.py` | 4 | Stale job/song error clearing on success |
 | `test_genre.py` | 7 | iTunes genre lookup, matching, env disabled |
 | `test_health.py` | 6 | GET /health, degraded state |
-| `test_index.py` | 9 | S3/Navidrome library index reconcile |
+| `test_index.py` | 17 | S3/Navidrome library index reconcile |
 | `test_lyrics.py` | 23 | LRCLIB lyrics fetch, retry, timestamp stripping |
 | `test_navidrome.py` | 12 | Navidrome Subsonic API client |
 | `test_postprocessors.py` | 16 | EnrichMeta (tags, cover art, lyrics, genre), UploadToS3 |
 | `test_redis_client.py` | 2 | Valkey-backed cookie store/health helpers |
-| `test_routes_search.py` | 15 | GET /search, caching, validation |
-| `test_routes_download.py` | 11 | POST /download, Celery task dispatch |
+| `test_routes_search.py` | 17 | GET /search, caching, validation |
+| `test_routes_download.py` | 15 | POST /download, Celery task dispatch |
 | `test_routes_cookies.py` | 14 | GET/POST /cookies, upload validation |
-| `test_routes_jobs.py` | 38 | GET /jobs, job groups, retry logic |
+| `test_routes_jobs.py` | 52 | GET /jobs, job groups, retry logic |
 | `test_routes_thumbnail.py` | 10 | GET /thumbnail proxying, cache |
 | `test_scheduler.py` | 8 | Index dispatcher, lock, interval |
+| `test_stats.py` | 7 | GET /stats aggregation, visibility, genre backfill |
 
 The DB layer is replaced with SQLite `:memory:` per test via the `sqlite_db` fixture in `tests/conftest.py`.
 

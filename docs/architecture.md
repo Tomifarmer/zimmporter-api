@@ -1,6 +1,6 @@
 # Zimmporter Architecture
 
-Music importer that searches YouTube Music, downloads albums and playlists, converts to AAC with embedded metadata and cover art, and uploads to an S3-compatible bucket.  Exposed as a FastAPI + Celery API.
+Music importer that searches YouTube Music, downloads albums, playlists, and individual tracks, converts to AAC with embedded metadata and cover art, and uploads to an S3-compatible bucket.  Exposed as a FastAPI + Celery API.
 
 ## High-Level Data Flow
 
@@ -13,7 +13,7 @@ Client (curl / UI)
 |  app.py          |
 +------------------+
   |                    |
-|  /search           |  /download/{album|playlist}
+|  /search           |  /download/{album|playlist|single}
   |  (sync, cached)   |  (async via Celery)
   v                    v
  +------------------+  +------------------+
@@ -28,7 +28,7 @@ Client (curl / UI)
 |  tasks/download  |     |  (broker)        |
 +------------------+     +------------------+
        |
-       |  billiard.Pool (N workers per album)
+       |  billiard.Pool (N workers per album/playlist/single)
        v
 +------------------+
 |  yt-dlp + ffmpeg |  Download + AAC convert
@@ -49,7 +49,7 @@ Client (curl / UI)
 | Module | Purpose |
 |--------|---------|
 | `cert.py` | Private CA certificate configuration: `get_ca_cert()` returns cert path from env vars, `configure_ssl()` sets up requests library at startup |
-| `core.py` | `Zimmporter` class: search via ytmusicapi, download via yt-dlp + `billiard.Pool`, AAC conversion, per-song download methods returning status dicts |
+| `core.py` | `Zimmporter` class: search via ytmusicapi, download via yt-dlp + `billiard.Pool`, AAC conversion, per-song download methods returning status dicts (`download_album_song`, `download_playlist_song`, `download_single_song`) |
 | `cookie_health.py` | Cookie staleness helpers: `mark_stale()`, `is_stale()`, `clear_stale()` backed by a Valkey flag (db 3) |
 | `postprocessors.py` | yt-dlp postprocessors: `EnrichMeta` (ID3 + MP4 tags + cover art + lyrics + genre embed), `UploadToS3` (S3 upload + file cleanup) |
 | `ytdlp_logger.py` | Custom logger with per-song `[album/song]` context injected into every log line |
@@ -64,10 +64,10 @@ Client (curl / UI)
 | `app.py` | FastAPI instance, startup SSL config + DB init, `/health` endpoint (always returns HTTP 200 with `"ok"` or `"degraded"` status to report partial outages without breaking callers), stalled-job cleanup (`JOB_STALLED_TIMEOUT`), CORS middleware |
 | `scheduler.py` | Periodic library index dispatcher (`INDEX_INTERVAL_MINUTES`, default 30; `INDEX_SOURCE` selects `s3`/`navidrome`/`both`) — runs inside the API pod, guarded by a Valkey lock (db 4), no Celery beat container |
 | `models.py` | Pydantic request/response models for OpenAPI schema generation |
-| `routes/search.py` | `GET /search` — synchronous ytmusicapi query with Valkey caching (5 min TTL, db 2), supports `limit` and `type` (albums/featured_playlists/community_playlists); enriches results with an `available` flag from the `available_albums` index; when `API_PROXY_FETCH=true` fetches and embeds thumbnails as base64 data URIs |
+| `routes/search.py` | `GET /search` — synchronous ytmusicapi query with Valkey caching (5 min TTL, db 2), supports `limit` and `type` (albums/songs/featured_playlists/community_playlists); enriches results with an `available` flag from the `available_albums` index (songs match successful `songs` rows); when `API_PROXY_FETCH=true` fetches and embeds thumbnails as base64 data URIs |
 | `routes/thumbnail.py` | `GET /thumbnail?url=` — proxies thumbnail from CDN through the API, cached in db 3 (24 h TTL), excluded from auth middleware |
 | `routes/cookies.py` | `GET /cookies` (metadata) and `POST /cookies` (multipart upload) manage the yt-dlp cookies file; validated, written atomically into `COOKIE_DIR`; contents never exposed |
-| `routes/download.py` | `POST /download/{album\|playlist}` — DB Job row first, then Celery task dispatch |
+| `routes/download.py` | `POST /download/{album\|playlist\|single}` — DB Job row first, then Celery task dispatch |
 | `routes/jobs.py` | `GET /jobs/{id}`, `GET /jobs`, `DELETE /jobs/{id}` — job/song status from MariaDB; delete restricted to admins/owners when social login is enabled |
 
 ### `db/` - Database Layer
@@ -82,7 +82,7 @@ Client (curl / UI)
 | Module | Purpose |
 |--------|---------|
 | `celery_app.py` | Celery instance, Valkey broker/backend, JSON serialization, late ACKs; calls `configure_ssl()` at module load for worker processes; pre-warms yt-dlp plugins serially on worker process init (avoids first-import race) |
-| `download.py` | `download_album` / `download_playlist` tasks: billiard.Pool concurrency, per-song DB updates; upserts downloaded items into `available_albums` |
+| `download.py` | `download_album` / `download_playlist` / `download_single` tasks: billiard.Pool concurrency, per-song DB updates; upserts downloaded items into `available_albums` (singles as `{artist}/Singles`) |
 | `index.py` | `index_albums` task: scans the S3 bucket (`{artist}/{album}/` prefixes) and reconciles the `available_albums` table (upsert + prune) |
 
 ## Concurrency Model
@@ -91,7 +91,7 @@ Two levels of parallelism:
 
 1. **Celery level**: Each Celery worker process handles one download job (`worker_prefetch_multiplier=1`, `task_acks_late=True`).  Multiple worker processes can run in parallel.
 
-2. **Pool level**: Within a single album/playlist, `billiard.Pool(concurrent)` spawns child processes for per-song downloads.  Each child runs `yt-dlp` with ffmpegAAC conversion and S3 upload.
+2. **Pool level**: Within a single album/playlist/single, `billiard.Pool(concurrent)` spawns child processes for per-song downloads.  Each child runs `yt-dlp` with ffmpegAAC conversion and S3 upload.
 
 ```
 Celery Worker Process
@@ -116,7 +116,7 @@ Celery Worker Process
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | `INT AUTO_INCREMENT` | Primary key, doubles as Celery `task_id` |
-| `job_type` | `ENUM(album, playlist)` | Job type |
+| `job_type` | `ENUM(album, playlist, single)` | Job type |
 | `browse_id` | `VARCHAR(512)` | Comma-separated YT Music browse IDs |
 | `status` | `ENUM(pending, running, success, failed)` | Job state |
 | `message` | `TEXT` | Human-readable progress |
@@ -137,8 +137,8 @@ Celery Worker Process
 | `job_id` | `INT (FK -> jobs.id)` | Parent job, CASCADE DELETE |
 | `title` | `VARCHAR(512)` | Song title |
 | `artist` | `VARCHAR(512)` | Artist name or `"playlists"` |
-| `album` | `VARCHAR(512)` | Album/playlist title |
-| `track_number` | `INT NULL` | Track index (NULL for playlists) |
+| `album` | `VARCHAR(512)` | Album/playlist title (`"Singles"` for single tracks) |
+| `track_number` | `INT NULL` | Track index (NULL for playlists and singles) |
 | `status` | `ENUM(pending, downloading, success, failed)` | Song state |
 | `s3_path` | `VARCHAR(1024)` | S3 object key after upload |
 | `error` | `TEXT` | Failure reason |
@@ -207,7 +207,7 @@ The `available_albums` table is kept in sync with the backend library. The
 index source is selected via `INDEX_SOURCE` (`s3` default, `navidrome`, or
 `both`):
 
-- **Recording** — download tasks (`tasks/download.py`) upsert every successfully downloaded album/playlist with its exact YT Music `browse_id`.
+- **Recording** — download tasks (`tasks/download.py`) upsert every successfully downloaded album/playlist/single with its exact YT Music `browse_id` (singles are recorded under `{artist}/Singles`).
 - **Periodic scan** — `api/scheduler.py` runs inside the API pod and dispatches `tasks.index_albums` (S3) and/or `tasks.index_navidrome` (Navidrome) every `INDEX_INTERVAL_MINUTES` (default 30, min 1). The S3 task scans the bucket (`{artist}/{album}/` prefixes); the Navidrome task queries the server's Subsonic API (`getAlbumList2`, via `zimmporter/navidrome.py`) for the albums it has indexed. Both upsert found items and prune entries no longer present. A Valkey lock (db 4) deduplicates dispatch across multiple API replicas — no Celery beat container is needed.
 - **Search enrichment** — `GET /search` matches each result against the index by `browse_id` (or normalized artist+title) after the cache read, so results stay fresh.
 

@@ -118,6 +118,30 @@ MOCK_ALBUM_DATA_NO_YEAR = {
     ],
 }
 
+MOCK_WATCH_PLAYLIST = {
+    "tracks": [
+        {
+            "videoId": "vid_song_001",
+            "title": "Test Song",
+            "artists": [{"name": "Song Artist"}],
+            "album": {"name": "Test Album"},
+            "year": "2024",
+            "duration": "3:45",
+            "thumbnails": [{"url": "https://example.com/song_thumb.jpg", "width": 120, "height": 120}],
+        }
+    ]
+}
+
+MOCK_SONG_DETAILS = {
+    "videoDetails": {
+        "videoId": "vid_song_001",
+        "title": "Test Song",
+        "author": "Song Artist",
+        "lengthSeconds": "225",
+        "thumbnail": {"thumbnails": [{"url": "https://example.com/song_thumb.jpg", "width": 120, "height": 120}]},
+    }
+}
+
 MOCK_PLAYLIST_DATA = {
     "title": "Test Playlist",
     "thumbnails": [

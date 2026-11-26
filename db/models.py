@@ -1,8 +1,8 @@
 """SQLAlchemy ORM models for job tracking.
 
-Tracks download jobs (albums or playlists) and individual song-level
-status in MariaDB.  Used by API routes for status queries and by
-Celery tasks for progress updates.
+Tracks download jobs (albums, playlists, or individual singles) and
+individual song-level status in MariaDB.  Used by API routes for status
+queries and by Celery tasks for progress updates.
 """
 
 import datetime
@@ -30,14 +30,14 @@ class Base(DeclarativeBase):
 
 
 class Job(Base):
-    """Represents a download job (album or playlist batch).
+    """Represents a download job (album, playlist, or single batch).
 
     The primary key (`id`) doubles as the Celery ``task_id`` so that API
     callers can poll ``GET /jobs/{id}`` for real-time progress.
 
     Attributes:
         id: Auto-incrementing primary key.
-        job_type: Either ``"album"`` or ``"playlist"``.
+        job_type: One of ``"album"``, ``"playlist"``, or ``"single"``.
         browse_id: Comma-separated YT Music browse IDs from the request.
         status: ``pending``, ``running``, ``success``, or ``failed``.
         message: Human-readable progress message.
@@ -58,7 +58,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    job_type = Column(Enum("album", "playlist", name="job_type_enum"), nullable=False)
+    job_type = Column(Enum("album", "playlist", "single", name="job_type_enum"), nullable=False)
     browse_id = Column(String(512), nullable=False)
     status = Column(
         Enum("pending", "running", "success", "failed", name="job_status_enum"),
@@ -97,8 +97,8 @@ class Song(Base):
         job_id: Foreign key to :class:`Job` (cascade delete).
         title: Song title.
         artist: Artist name (or ``"playlists"`` for playlist songs).
-        album: Album or playlist title.
-        track_number: Track index (``None`` for playlists).
+        album: Album or playlist title (``"Singles"`` for single tracks).
+        track_number: Track index (``None`` for playlists and singles).
         status: ``pending``, ``downloading``, ``success``, ``failed``, or
             ``unavailable`` (playlist tracks with no video ID).
         s3_path: S3 object key after successful upload.

@@ -52,7 +52,11 @@ def _backfill_genres() -> None:
         with get_session() as session:
             rows = (
                 session.query(AvailableAlbum)
-                .filter(AvailableAlbum.artist != "playlists", AvailableAlbum.genre.is_(None))
+                .filter(
+                    AvailableAlbum.artist != "playlists",
+                    AvailableAlbum.album != "Singles",
+                    AvailableAlbum.genre.is_(None),
+                )
                 .order_by(AvailableAlbum.id.asc())
                 .limit(_GENRE_BACKFILL_LIMIT)
                 .all()
@@ -90,36 +94,30 @@ def get_stats(request: Request) -> StatsResponse:
             job_query = job_query.filter(or_(*predicates))
 
         total = job_query.count()
-        status_counts = dict(
-            job_query.with_entities(Job.status, func.count()).group_by(Job.status).all()
-        )
-        type_counts = dict(
-            job_query.with_entities(Job.job_type, func.count()).group_by(Job.job_type).all()
+        status_counts = dict(job_query.with_entities(Job.status, func.count()).group_by(Job.status).all())
+        type_counts = dict(job_query.with_entities(Job.job_type, func.count()).group_by(Job.job_type).all())
+
+        album_filters = (
+            AvailableAlbum.artist != "playlists",
+            AvailableAlbum.album != "Singles",
         )
 
         library = LibraryStats(
-            albums=session.query(AvailableAlbum)
-            .filter(AvailableAlbum.artist != "playlists")
-            .count(),
-            playlists=session.query(AvailableAlbum)
-            .filter(AvailableAlbum.artist == "playlists")
-            .count(),
+            albums=session.query(AvailableAlbum).filter(*album_filters).count(),
+            playlists=session.query(AvailableAlbum).filter(AvailableAlbum.artist == "playlists").count(),
             artists=(
                 session.query(func.count(func.distinct(AvailableAlbum.artist)))
                 .filter(AvailableAlbum.artist != "playlists")
                 .scalar()
                 or 0
             ),
-            tracks=(
-                session.query(func.coalesce(func.sum(AvailableAlbum.track_count), 0)).scalar()
-                or 0
-            ),
+            tracks=(session.query(func.coalesce(func.sum(AvailableAlbum.track_count), 0)).scalar() or 0),
         )
 
         genre_rows = (
             session.query(AvailableAlbum.genre, func.count())
             .filter(
-                AvailableAlbum.artist != "playlists",
+                *album_filters,
                 AvailableAlbum.genre.isnot(None),
             )
             .group_by(AvailableAlbum.genre)
@@ -159,6 +157,7 @@ def get_stats(request: Request) -> StatsResponse:
             by_type=JobTypeCounts(
                 album=type_counts.get("album", 0),
                 playlist=type_counts.get("playlist", 0),
+                single=type_counts.get("single", 0),
             ),
         ),
         library=library,

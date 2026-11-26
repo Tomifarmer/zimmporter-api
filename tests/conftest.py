@@ -10,6 +10,8 @@ from tests.mock_data import (
     MOCK_ALBUM_DATA_WITH_SLASHES,
     MOCK_PLAYLIST_DATA,
     MOCK_SEARCH_RESPONSE,
+    MOCK_SONG_DETAILS,
+    MOCK_WATCH_PLAYLIST,
 )
 
 os.environ.setdefault("CELERY_BROKER", "redis://localhost:6379/0")
@@ -42,6 +44,8 @@ def _get_album_side_effect(browse_id):
 
 _ytm_instance.get_album.side_effect = _get_album_side_effect
 _ytm_instance.get_playlist.return_value = MOCK_PLAYLIST_DATA
+_ytm_instance.get_watch_playlist.return_value = MOCK_WATCH_PLAYLIST
+_ytm_instance.get_song.return_value = MOCK_SONG_DETAILS
 
 _patches.append(patch("ytmusicapi.YTMusic", return_value=_ytm_instance))
 
@@ -185,3 +189,13 @@ def mock_celery_tasks():
         patch("api.routes.download.download_playlist", mock_playlist),
     ):
         yield mock_album.apply_async, mock_playlist.apply_async
+
+
+@pytest.fixture
+def mock_single_task():
+    mock_single = MagicMock()
+    with (
+        patch("api.routes.jobs.download_single", mock_single),
+        patch("api.routes.download.download_single", mock_single),
+    ):
+        yield mock_single.apply_async

@@ -23,6 +23,7 @@ The ``_init_worker`` initializer re-creates the :class:`YTDLPLogger` in
 each forked child because logger state is lost after ``os.fork()``.
 """
 
+import datetime
 import logging
 import os
 import shutil
@@ -54,6 +55,62 @@ def dict_only_tracks(tracks) -> list:
     well-formed track dicts.
     """
     return [t for t in tracks if isinstance(t, dict)] if isinstance(tracks, (list, tuple)) else []
+
+
+def _resolve_single_metadata(yt, video_id: str) -> dict:
+    """Resolve metadata for a standalone track from its video ID.
+
+    Prefers the watch-playlist entry (rich metadata: title, artists, album,
+    thumbnails), falls back to ``get_song``'s ``videoDetails``, and finally to
+    a minimal dict so the download can still be attempted.
+    """
+    track: dict = {}
+    try:
+        watch = yt.get_watch_playlist(videoId=video_id, limit=1)
+        tracks = dict_only_tracks(watch.get("tracks") or [])
+        if tracks:
+            track = dict(tracks[0])
+    except Exception:  # noqa: BLE001 - metadata resolution is best-effort
+        logger.warning("get_watch_playlist failed for %s", video_id, exc_info=True)
+
+    if not track.get("title"):
+        try:
+            details = yt.get_song(video_id).get("videoDetails", {})
+        except Exception:  # noqa: BLE001 - fallback is best-effort
+            logger.warning("get_song failed for %s", video_id, exc_info=True)
+            details = {}
+        if details.get("title"):
+            track = {
+                "videoId": video_id,
+                "title": details["title"],
+                "artists": [{"name": details.get("author") or "Unknown"}],
+                "thumbnails": (details.get("thumbnail") or {}).get("thumbnails", []),
+                "lengthSeconds": details.get("lengthSeconds"),
+            }
+
+    if not track.get("title"):
+        track = {"videoId": video_id, "title": video_id, "artists": [{"name": "Unknown"}], "thumbnails": []}
+
+    track.setdefault("videoId", video_id)
+    return track
+
+
+def _single_artist(track: dict) -> str:
+    """Return the primary artist name for a single track."""
+    artists = track.get("artists") or []
+    if artists and isinstance(artists[0], dict):
+        return artists[0].get("name") or "Unknown"
+    return track.get("artist") or "Unknown"
+
+
+def _parse_release_year(value) -> datetime.date | None:
+    """Parse a YT Music year value into a ``date`` (``None`` when unknown)."""
+    if value is None or value == "":
+        return None
+    try:
+        return datetime.date(int(str(value)[:4]), 1, 1)
+    except ValueError:
+        return None
 
 
 def flush_song_updates(session, updates: list[dict]) -> None:
@@ -475,6 +532,189 @@ def download_playlist(self, ids: str, concurrent: int = 4) -> dict:
                 message="All playlists downloaded successfully",
                 current_album=None,
                 current_song=0,
+                error=None,
+            )
+        return {"status": "success"}
+
+    except Exception as exc:
+        with get_session() as session:
+            _update_job(
+                session,
+                self.request.id,
+                status="failed",
+                message=str(exc),
+                error=str(exc),
+            )
+        raise self.retry(exc=exc) from exc
+
+
+@celery_app.task(bind=True, name="tasks.download_single", max_retries=0)
+def download_single(self, ids: str, concurrent: int = 4) -> dict:
+    """Download one or more individual tracks.
+
+    Each ID is a YouTube Music ``videoId``.  For every track the task:
+
+    * Resolves metadata via the watch playlist (falling back to ``get_song``)
+    * Downloads the track thumbnail
+    * Inserts one ``pending`` :class:`db.models.Song` row with
+      ``album="Singles"`` and no track number
+    * Downloads via ``concurrent`` threads to
+      ``{artist}/Singles/{title}.m4a``
+    * Updates song status and job progress after each track completes
+
+    The Celery ``task_id`` must match the DB ``Job.id`` (enforced by
+    :func:`api.routes.download.single_download`).
+
+    Args:
+        ids: Comma-separated YouTube Music video IDs.
+        concurrent: Number of parallel download workers.
+
+    Returns:
+        ``{"status": "success"}`` on completion.
+
+    Raises:
+        Exception: Job is marked ``failed`` in DB.
+    """
+    with get_session() as session:
+        session.query(Job).filter(Job.id == self.request.id).update(
+            {"status": "running", "message": "Started", "current_album": None, "error": None}
+        )
+
+    _refresh_cookie_config()
+    zimm = Zimmporter()
+    ids_list = list(dict.fromkeys(video_id.strip() for video_id in ids.split(",") if video_id.strip()))
+
+    try:
+        total = len(ids_list)
+        to_download: list[tuple] = []
+        cover_dirs: list[str] = []
+        artists: set[str] = set()
+
+        for idx, video_id in enumerate(ids_list):
+            track = _resolve_single_metadata(zimm.yt, video_id)
+            title = track["title"]
+            artist = _single_artist(track)
+            artists.add(artist)
+            year = track.get("year")
+            thumbnails = track.get("thumbnails") or []
+            thumbnail_url = (
+                max(thumbnails, key=lambda t: t.get("width", 0) * t.get("height", 0))["url"]
+                if thumbnails
+                else f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+            )
+            cover_dir = f"{temp_dir}Singles/{artist}/{video_id}"
+            thumbnail_path = f"{cover_dir}/cover.jpg"
+            os.makedirs(cover_dir, exist_ok=True)
+            cover_dirs.append(cover_dir)
+            with open(thumbnail_path, "wb") as f:
+                f.write(requests.get(thumbnail_url, verify=get_ca_cert()).content)
+
+            with get_session() as session:
+                existing_titles = {
+                    row[0] for row in session.query(Song.title).filter(Song.job_id == self.request.id).all()
+                }
+                successful_titles = {
+                    row[0]
+                    for row in session.query(Song.title)
+                    .filter(Song.job_id == self.request.id, Song.status == "success")
+                    .all()
+                }
+                if title not in existing_titles:
+                    session.add(
+                        Song(
+                            job_id=self.request.id,
+                            title=title,
+                            artist=artist,
+                            album="Singles",
+                            track_number=None,
+                            status="pending",
+                            release_date=_parse_release_year(year),
+                        )
+                    )
+                _update_job(
+                    session,
+                    self.request.id,
+                    status="running",
+                    message=f"Preparing track: {title}",
+                    current_album=f"{artist} - {title}",
+                    album_progress=idx + 1,
+                    total_albums=total,
+                    current_song=idx,
+                    total_songs=total,
+                    album_name=title,
+                    artist=artist,
+                )
+
+            if title in successful_titles:
+                with get_session() as session:
+                    _update_job(session, self.request.id, current_song=idx + 1)
+                continue
+
+            to_download.append((track, artist, thumbnail_path, year))
+
+        total_tracks = len(to_download)
+        zimm.yt = None
+        with ThreadPoolExecutor(max_workers=concurrent) as executor:
+            futures = [executor.submit(zimm._download_single_song_task, *args) for args in to_download]
+
+            updates = []
+
+            for idx, future in enumerate(as_completed(futures)):
+                result = future.result()
+                # Build update payload (skip None values so existing data isn't cleared)
+                song_update = {"job_id": self.request.id, "title": result["title"]}
+                if result.get("status") is not None:
+                    song_update["status"] = result["status"]
+                if result.get("s3_path") is not None:
+                    song_update["s3_path"] = result["s3_path"]
+                if result.get("error") is not None:
+                    song_update["error"] = result["error"]
+
+                updates.append(song_update)
+
+                # Commit accumulated batch when threshold reached (song + job progress in one session)
+                if len(updates) >= BATCH_SIZE:
+                    with get_session() as session:
+                        flush_song_updates(session, updates)
+                        _update_job(
+                            session,
+                            self.request.id,
+                            message=f"Processed {idx + 1}/{total_tracks} tracks",
+                            current_song=idx + 1,
+                        )
+                    updates.clear()
+
+            # Final flush of any remaining updates after all futures complete
+            with get_session() as session:
+                flush_song_updates(session, updates)
+
+        for cover_dir in cover_dirs:
+            shutil.rmtree(cover_dir, ignore_errors=True)
+
+        with get_session() as session:
+            artist_counts = {
+                artist: session.query(Song)
+                .filter(
+                    Song.artist == artist,
+                    Song.album == "Singles",
+                    Song.status == "success",
+                )
+                .count()
+                for artist in artists
+            }
+
+        for artist, success_count in artist_counts.items():
+            if success_count:
+                upsert_available_album(artist, "Singles", track_count=success_count)
+
+        with get_session() as session:
+            _update_job(
+                session,
+                self.request.id,
+                status="success",
+                message="All tracks downloaded successfully",
+                current_album=None,
+                current_song=total,
                 error=None,
             )
         return {"status": "success"}
