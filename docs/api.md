@@ -1,6 +1,6 @@
 # Zimmporter API Reference
 
-Internal REST API for searching YouTube Music, queueing album/playlist downloads, and tracking job progress.  Served by a FastAPI + Uvicorn instance, backed by a Celery worker pool, MariaDB, and Valkey.
+Internal REST API for searching YouTube Music, queueing album/playlist/single-track downloads, and tracking job progress.  Served by a FastAPI + Uvicorn instance, backed by a Celery worker pool, MariaDB, and Valkey.
 
 ## Quick Start
 
@@ -20,6 +20,11 @@ curl -X POST "http://localhost:8000/download/album" \
 curl -X POST "http://localhost:8000/download/playlist" \
   -H "Content-Type: application/json" \
   -d '{"id":"VLx_xxxxxxx","concurrent":4}' | jq .
+
+# Queue a single-track download (videoId from type=songs search)
+curl -X POST "http://localhost:8000/download/single" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"vid_xxxxxxxxx","concurrent":4}' | jq .
 
 # Poll job status
 curl -s "http://localhost:8000/jobs/1" | jq .
@@ -160,17 +165,17 @@ Validates all backend components: Valkey (broker), Celery workers, and MariaDB. 
 ### Search
 
 ```
-GET /search?q=<query>&type=<albums|featured_playlists|community_playlists>&limit=10
+GET /search?q=<query>&type=<albums|songs|featured_playlists|community_playlists>&limit=10
 ```
 
-Searches YouTube Music and returns structured result dicts.  Use the returned `browseId` to trigger a download.  Results are cached in Valkey for 5 minutes; subsequent requests for the same query are served from cache.
+Searches YouTube Music and returns structured result dicts.  Use the returned `browseId` (albums/playlists) or `videoId` (songs) to trigger a download.  Results are cached in Valkey for 5 minutes; subsequent requests for the same query are served from cache.
 
 **Query Parameters:**
 
 | Param | Type | Default | Constraints | Description |
 |-------|------|---------|-------------|-------------|
 | `q` | string | *(required)* | — | Free-text search query |
-| `type` | string | `albums` | — | Result type: `albums`, `featured_playlists`, or `community_playlists` |
+| `type` | string | `albums` | — | Result type: `albums`, `songs`, `featured_playlists`, or `community_playlists` |
 | `limit` | int | `10` | 1–50 | Number of results to return |
 
 **Response (when `API_PROXY_FETCH` is not enabled):**
@@ -184,6 +189,24 @@ Searches YouTube Music and returns structured result dicts.  Use the returned `b
       "year": "2023",
       "type": "Album",
       "artist": ["Artist Name"],
+      "thumbnail": "https://lh3.googleusercontent.com/...",
+      "available": false
+    }
+  ]
+}
+```
+
+**Song results (`type=songs`):**
+```json
+{
+  "results": [
+    {
+      "resultType": "song",
+      "videoId": "vid_xxxxx",
+      "title": "Track Title",
+      "artist": ["Artist Name"],
+      "album": "Album Title",
+      "duration": "3:45",
       "thumbnail": "https://lh3.googleusercontent.com/...",
       "available": false
     }
@@ -209,7 +232,7 @@ Searches YouTube Music and returns structured result dicts.  Use the returned `b
 }
 ```
 
-Each result includes an `available` boolean flagging albums/playlists already present in the S3 library (matched by exact `browseId` or normalized artist+title, sourced from the `available_albums` table).
+Each result includes an `available` boolean flagging items already present in the library.  Albums/playlists are matched by exact `browseId` or normalized artist+title against the `available_albums` table; songs are matched by normalized artist+title against successfully downloaded `songs` rows.
 
 When `API_PROXY_FETCH=true`, the `thumbnail` field is a **base64 data URI** instead of a CDN URL. The API fetches thumbnails concurrently through its outbound proxy, caches them in Valkey db 3 for 24 hours, and embeds them directly in the response. The frontend can render these `<img src="data:...">` without any additional network requests.
 ```
@@ -364,6 +387,37 @@ Queues one or more playlists for download.  Same flow as album download.
 
 ---
 
+### Download Single
+
+```
+POST /download/single
+```
+
+Queues one or more individual tracks for download.  Each `id` is a YouTube Music `videoId` (from a `type=songs` search).  Tracks are stored at `{artist}/Singles/{title}.m4a` with the album tag set to `Singles`.
+
+**Request Body:**
+```json
+{
+  "id": "vid_xxxxx,vid_yyyyy",
+  "concurrent": 4
+}
+```
+
+| Field | Type | Default | Constraints | Description |
+|-------|------|---------|-------------|-------------|
+| `id` | string | *(required)* | — | Comma-separated song video IDs |
+| `concurrent` | int | `4` | 1–32 | Parallel downloads per track |
+
+**Response:**
+```json
+{
+  "job_id": 44,
+  "status": "pending"
+}
+```
+
+---
+
 ### Get Job Status
 
 ```
@@ -412,7 +466,7 @@ Additional fields on `JobStatusResponse`:
 | Field | Type | Description |
 |-------|------|-------------|
 | `requested_by` | string \| null | Name or sub of the OIDC user who requested the job (`null` for API-key or unauthenticated requests) |
-| `artist` | string \| null | Artist name (`null` for playlists) |
+| `artist` | string \| null | Artist name (`null` for playlists; set for singles) |
 | `album_name` | string \| null | Original album/playlist title (raw, unformatted) |
 | `songs_downloaded` | int | Count of songs with status `"success"` |
 | `created_at` | string \| null | ISO 8601 UTC timestamp of job creation |
@@ -476,13 +530,13 @@ Resets all failed songs in a job to `pending` (clearing their error messages) an
 ## Job Lifecycle
 
 ```
-POST /download/{album|playlist}
+POST /download/{album|playlist|single}
     -> DB: Job row created (status=pending)
     -> Celery: task dispatched (task_id = job.id)
 
 Celery worker picks up task
     -> DB: status = "running", message = "Started", error = NULL  (clears stale failure)
-    -> For each album/playlist:
+    -> For each album/playlist/single:
         -> Fetch tracks from ytmusicapi
         -> Insert Song rows (status=pending)
         -> Pool downloads songs in parallel
@@ -500,7 +554,7 @@ A job's `error` is cleared whenever it starts running again (fresh task, retry, 
 |--------|---------|
 | `pending` | Job created, waiting for Celery worker |
 | `running` | Worker is processing songs (or retrying after `POST /jobs/{job_id}/retry`) |
-| `success` | All albums/playlists processed |
+| `success` | All albums/playlists/tracks processed |
 | `failed` | Unrecoverable error occurred (retryable via `POST /jobs/{job_id}/retry`) |
 
 ### Song Statuses

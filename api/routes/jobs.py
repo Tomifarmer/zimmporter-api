@@ -14,7 +14,7 @@ from api.models import JobResponse, JobStatsResponse, JobStatusResponse
 from api.user import get_requested_by, get_requested_groups, is_admin, social_login_enabled
 from db.engine import get_session
 from db.models import Job, Song
-from tasks.download import download_album, download_playlist
+from tasks.download import download_album, download_playlist, download_single
 
 jobs_router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -324,7 +324,11 @@ def retry_job(job_id: int, request: Request) -> JobResponse:
         job.error = None
         session.commit()
 
-    task = download_album if job_type == "album" else download_playlist
+    task = {
+        "album": download_album,
+        "playlist": download_playlist,
+        "single": download_single,
+    }[job_type]
     task.apply_async(args=[browse_id], kwargs={"concurrent": 4}, task_id=str(job_id))
 
     return JobResponse(job_id=job_id, status="running")

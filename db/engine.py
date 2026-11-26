@@ -82,6 +82,15 @@ def migrate_schema() -> None:
                 conn.execute(sa_text(ddl))
         conn.commit()
 
+    job_type_col = next((col for col in inspect(engine).get_columns("jobs") if col["name"] == "job_type"), None)
+    if job_type_col is not None and hasattr(job_type_col["type"], "enums"):
+        current_enums = list(job_type_col["type"].enums)
+        if "single" not in current_enums:
+            enum_values = ",".join(f"'{v}'" for v in current_enums + ["single"])
+            with engine.connect() as conn:
+                conn.execute(sa_text(f"ALTER TABLE jobs MODIFY COLUMN job_type ENUM({enum_values}) NOT NULL"))
+                conn.commit()
+
     album_additions = {
         "genre": "ALTER TABLE available_albums ADD COLUMN genre VARCHAR(128) NULL",
     }

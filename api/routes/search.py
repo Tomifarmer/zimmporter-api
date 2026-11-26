@@ -1,8 +1,8 @@
 """Search route — ``GET /search``.
 
 Synchronously calls :meth:`zimmporter.core.Zimmporter.search` via
-ytmusicapi with Valkey caching.  Use this endpoint to find album or
-playlist browse IDs before triggering a download.
+ytmusicapi with Valkey caching.  Use this endpoint to find album, song,
+or playlist IDs before triggering a download.
 """
 
 import base64
@@ -19,7 +19,7 @@ from starlette.requests import Request
 from api.models import SearchResponse
 from api.routes.thumbnail import _cache_key
 from db.engine import get_session
-from db.models import AvailableAlbum
+from db.models import AvailableAlbum, Song
 from tasks.celery_app import celery_app
 from zimmporter.core import Zimmporter
 
@@ -66,23 +66,46 @@ def _load_available_index() -> tuple[set[str], set[tuple[str, str]]]:
     return browse_ids, names
 
 
+def _load_available_songs() -> set[tuple[str, str]]:
+    """Load successfully downloaded ``(normalized artist, normalized title)`` pairs.
+
+    Used to flag individual song search results as already present in the
+    library.  Failures are swallowed so search still works when the DB is
+    unavailable.
+    """
+    songs: set[tuple[str, str]] = set()
+    try:
+        with get_session() as session:
+            rows = session.query(Song.artist, Song.title).filter(Song.status == "success").distinct().all()
+            for artist, title in rows:
+                songs.add((_norm(artist), _norm(title)))
+    except Exception:
+        pass
+    return songs
+
+
 def _mark_available(results: list[dict]) -> None:
     """Add an ``available`` boolean to each search result in place.
 
     An album/playlist is flagged as available when its ``browseId`` matches
     the index exactly, or when a normalized artist + title matches a library
     entry.  Playlists are matched by title only (artist is ``"playlists"``).
+    Songs are matched against successfully downloaded song rows, with the
+    album-name index as a fallback.
     """
     browse_ids, names = _load_available_index()
+    songs = _load_available_songs()
     for result in results:
         available = bool(result.get("browseId") in browse_ids)
         if not available:
             title = _norm(result.get("title", ""))
-            if result.get("resultType") in ("album", "song", "video"):
-                for artist in result.get("artist", []) or []:
-                    if (_norm(artist), title) in names:
-                        available = True
-                        break
+            if result.get("resultType") in ("song", "video"):
+                artists = result.get("artist", []) or []
+                available = any((_norm(artist), title) in songs for artist in artists)
+                if not available:
+                    available = any((_norm(artist), title) in names for artist in artists)
+            elif result.get("resultType") == "album":
+                available = any((_norm(artist), title) in names for artist in result.get("artist", []) or [])
             else:
                 available = (_norm("playlists"), title) in names
         result["available"] = available
@@ -176,22 +199,24 @@ def search(
     request: Request,
     q: str = Query(..., description="Search query"),
     type: str = Query(
-        "albums", description="Result type: ``albums``, ``featured_playlists``, or ``community_playlists``"
+        "albums",
+        description="Result type: ``albums``, ``songs``, ``featured_playlists``, or ``community_playlists``",
     ),
     limit: int = Query(10, ge=1, le=50, description="Number of results (1-50)"),
 ) -> SearchResponse:
-    """Search YouTube Music for albums or playlists.
+    """Search YouTube Music for albums, songs, or playlists.
 
     Args:
         request: FastAPI request (injected automatically).
         q: Free-text search query.
-        type: Either ``"albums"`` (default), ``"featured_playlists"``, or ``"community_playlists"``.
+        type: ``"albums"`` (default), ``"songs"``, ``"featured_playlists"``,
+            or ``"community_playlists"``.
         limit: Maximum number of results to return (1-50, default 10).
 
     Returns:
         :class:`SearchResponse` with a list of structured result dicts.
     """
-    filter_value = type if type in ("albums", "featured_playlists", "community_playlists") else "albums"
+    filter_value = type if type in ("albums", "songs", "featured_playlists", "community_playlists") else "albums"
     cache_key = f"search:{q}:{filter_value}:{limit}"
     r = _get_redis()
 

@@ -1,4 +1,4 @@
-"""Download routes — ``POST /download/album`` and ``POST /download/playlist``.
+"""Download routes — ``POST /download/album``, ``POST /download/playlist``, ``POST /download/single``.
 
 Each endpoint creates a database :class:`db.models.Job` row first (to
 obtain an auto-increment ID), then triggers the matching Celery task
@@ -13,7 +13,7 @@ from api.models import DownloadRequest, JobResponse
 from api.user import get_requested_by, get_requested_groups_delimited
 from db.engine import get_session
 from db.models import Job
-from tasks.download import download_album, download_playlist
+from tasks.download import download_album, download_playlist, download_single
 
 download_router = APIRouter(prefix="/download", tags=["download"])
 
@@ -80,4 +80,37 @@ def playlist_download(req: DownloadRequest, request: Request) -> JobResponse:
         job_id = job.id
 
     download_playlist.apply_async(args=[req.id], kwargs={"concurrent": req.concurrent}, task_id=str(job_id))
+    return JobResponse(job_id=job_id, status="pending")
+
+
+@download_router.post("/single", response_model=JobResponse)
+def single_download(req: DownloadRequest, request: Request) -> JobResponse:
+    """Queue one or more individual tracks for download.
+
+    Same flow as :func:`album_download` but each ``id`` is a YouTube Music
+    ``videoId``.  Dispatches ``tasks.download_single``; tracks are stored at
+    ``{artist}/Singles/{title}.m4a``.
+
+    Args:
+        req: Song video ID(s) and desired concurrency.
+        request: FastAPI request (used to extract the authenticated user).
+
+    Returns:
+        The new ``job_id`` (always with status ``"pending"``).
+    """
+    with get_session() as session:
+        job = Job(
+            id=None,
+            job_type="single",
+            browse_id=req.id,
+            status="pending",
+            message="Queued",
+            requested_by=get_requested_by(request),
+            requested_groups=get_requested_groups_delimited(request),
+        )
+        session.add(job)
+        session.flush()
+        job_id = job.id
+
+    download_single.apply_async(args=[req.id], kwargs={"concurrent": req.concurrent}, task_id=str(job_id))
     return JobResponse(job_id=job_id, status="pending")

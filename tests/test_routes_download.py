@@ -74,6 +74,42 @@ class TestDownloadPlaylist:
         assert kwargs["task_id"] == str(job_id)
 
 
+class TestDownloadSingle:
+    def test_single_download_returns_job_id(self, test_client, mock_single_task):
+        resp = test_client.post("/download/single", json={"id": "vid_song_001", "concurrent": 4})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "job_id" in data
+        assert data["job_id"] > 0
+        assert data["status"] == "pending"
+
+    def test_single_download_creates_job_in_db(self, test_client, mock_single_task):
+        from db.engine import get_session
+        from db.models import Job
+
+        resp = test_client.post("/download/single", json={"id": "vid_song_001"})
+        job_id = resp.json()["job_id"]
+        with get_session() as session:
+            job = session.query(Job).filter(Job.id == job_id).first()
+            assert job is not None
+            assert job.job_type == "single"
+            assert job.browse_id == "vid_song_001"
+            assert job.status == "pending"
+
+    def test_single_download_triggers_celery_task(self, test_client, mock_single_task):
+        resp = test_client.post("/download/single", json={"id": "vid_song_001"})
+        job_id = resp.json()["job_id"]
+        mock_single_task.assert_called_once()
+        args, kwargs = mock_single_task.call_args
+        assert kwargs["task_id"] == str(job_id)
+        assert kwargs["args"] == ["vid_song_001"]
+
+    def test_single_download_custom_concurrent(self, test_client, mock_single_task):
+        test_client.post("/download/single", json={"id": "vid_song_001", "concurrent": 8})
+        _, kwargs = mock_single_task.call_args
+        assert kwargs["kwargs"]["concurrent"] == 8
+
+
 class TestDownloadValidation:
     def test_concurrent_too_low_returns_422(self, test_client):
         resp = test_client.post("/download/album", json={"id": "MPREb_abc123", "concurrent": 0})

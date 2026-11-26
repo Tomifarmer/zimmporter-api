@@ -19,6 +19,13 @@ class TestSearchRoute:
         resp = test_client.get("/search?q=test&type=songs")
         assert resp.status_code == 200
 
+    def test_search_passes_songs_filter_to_core(self, test_client, mocker):
+        from zimmporter.core import Zimmporter
+
+        spy = mocker.patch.object(Zimmporter, "search", return_value=[])
+        test_client.get("/search?q=test&type=songs")
+        assert spy.call_args.kwargs["filter"] == "songs"
+
     def test_search_with_playlists_filter(self, test_client):
         resp = test_client.get("/search?q=test&type=playlists")
         assert resp.status_code == 200
@@ -258,3 +265,44 @@ class TestSearchAvailability:
         resp = test_client.get("/search?q=test")
         data = resp.json()
         assert data["results"][0]["available"] is True
+
+    def _add_song(self, artist, title):
+        from db.engine import get_session
+        from db.models import Job, Song
+
+        with get_session() as session:
+            job = Job(job_type="single", browse_id="vid_test", status="success", message="done")
+            session.add(job)
+            session.flush()
+            session.add(Song(job_id=job.id, title=title, artist=artist, album="Singles", status="success"))
+            session.commit()
+
+    def test_matches_song_by_artist_and_title(self, test_client, mocker):
+        from zimmporter.core import Zimmporter
+
+        self._add_song("Song Artist", "Test Song")
+
+        mock_results = [
+            {
+                "resultType": "song",
+                "videoId": "vid_song_001",
+                "title": "Test Song",
+                "artist": ["Song Artist"],
+                "album": "Test Album",
+                "thumbnail": "https://x.jpg",
+            },
+            {
+                "resultType": "song",
+                "videoId": "vid_other",
+                "title": "Other Song",
+                "artist": ["Song Artist"],
+                "thumbnail": "https://x.jpg",
+            },
+        ]
+        mocker.patch.object(Zimmporter, "search", return_value=mock_results)
+
+        resp = test_client.get("/search?q=test&type=songs")
+        data = resp.json()
+        by_id = {r["videoId"]: r for r in data["results"]}
+        assert by_id["vid_song_001"]["available"] is True
+        assert by_id["vid_other"]["available"] is False

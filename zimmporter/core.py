@@ -208,7 +208,7 @@ class Zimmporter:
         Returns:
             List of dicts keyed by ``resultType``. All results include ``thumbnail``:
 
-            * ``"song"`` / ``"video"`` — ``videoId``, ``title``, ``artist``, ``duration``
+            * ``"song"`` / ``"video"`` — ``videoId``, ``title``, ``artist``, ``album``, ``duration``
             * ``"album"`` — ``browseId``, ``title``, ``year``, ``type``, ``artist``
             * ``"artist"`` — ``name``, ``subscribers``
             * ``"playlist"`` / ``"featured_playlists"`` — ``browseId``, ``title``, ``author``
@@ -220,12 +220,15 @@ class Zimmporter:
                 max(thumbnails, key=lambda t: t.get("width", 0) * t.get("height", 0))["url"] if thumbnails else None
             )
             if result["resultType"] in ["song", "video"]:
+                album = result.get("album")
+                album_name = album.get("name") if isinstance(album, dict) else album
                 results.append(
                     {
                         "resultType": result["resultType"],
                         "videoId": result["videoId"],
                         "title": result["title"],
                         "artist": [a["name"] for a in result["artists"]] if "artists" in result else [result["artist"]],
+                        "album": album_name,
                         "duration": result.get("duration", ""),
                         "thumbnail": thumbnail_url,
                     }
@@ -553,6 +556,106 @@ class Zimmporter:
         }
 
     @staticmethod
+    def download_single_song(
+        song: dict,
+        artist: str,
+        thumbnail_path: str,
+        year: str | int | None = None,
+        thread_id: int = None,
+    ) -> dict:
+        """Download, convert, and upload a single standalone track.
+
+        Same retry/backoff behaviour as :meth:`download_album_song`, but the
+        track is stored under ``{artist}/Singles/{title}.m4a`` and carries no
+        track number.  The album tag is set to ``"Singles"`` so it matches the
+        S3 layout and the library index.
+
+        Args:
+            song: Track dict from ytmusicapi (must contain ``title``,
+                ``videoId``).
+            artist: Primary artist name.
+            thumbnail_path: Local path to the cover image.
+            year: Release year (used for the ``date`` tag when known).
+            thread_id: Thread identifier used for temp dir isolation.
+
+        Returns:
+            Dict with keys ``title``, ``artist``, ``album``, ``track_number``,
+            ``status``, ``s3_path``, ``error``.
+        """
+        import yt_dlp
+
+        from zimmporter.postprocessors import EnrichMeta, UploadToS3
+
+        title = song["title"]
+        zimm = Zimmporter()
+        tid = thread_id or os.getpid()
+        sid = f"worker_{tid}"
+
+        # Isolated temp dir per thread — prevents cross-thread file races
+        worker_dir = f"{temp_dir}Singles/{artist}/{sid}"
+        work_dir = f"{worker_dir}/songs"
+        os.makedirs(work_dir, exist_ok=True)
+        song_dir = f"{work_dir}/{title}"
+        zimm.logger.info(f"[{sid}] [STARTING] Singles - {artist} - {title} (dir: {song_dir.replace(temp_dir, '')})")
+        zimm.ytdlp_logger.set_song(title)
+        zimm.ytdlp_logger.set_album("Singles")
+
+        YTDL_OPTS["outtmpl"] = f"{song_dir}/%(id)s.%(ext)s"
+        s3_path = Zimmporter._build_s3_path(artist, "Singles", title)
+        err_msg = None
+
+        with yt_dlp.YoutubeDL(YTDL_OPTS) as ydl:
+            metadata = {
+                "title": title,
+                "artist": artist,
+                "album": "Singles",
+                "date": str(year) if year not in (None, "") else None,
+            }
+            lyrics = _fetch_lyrics(artist, title)
+            if lyrics:
+                metadata["lyrics"] = lyrics
+                zimm.logger.info(f"[{sid}] Lyrics fetched for {artist} - {title}")
+            else:
+                zimm.logger.info(f"[{sid}] No lyrics found for {artist} - {title}")
+            ydl.add_post_processor(EnrichMeta(metadata, thumbnail_path), when="post_process")
+            ydl.add_post_processor(UploadToS3(metadata), when="post_process")
+
+            for attempt in range(MAX_RETRIES):
+                try:
+                    ydl.download([f"https://music.youtube.com/watch?v={song['videoId']}"])
+                    break
+                except Exception as err:
+                    is_403 = getattr(err, "response", None) is not None and err.response.status_code == 403
+                    _flag_stale_cookies(err)
+                    zimm.logger.warning(f"[{sid}] Attempt {attempt + 1}/{MAX_RETRIES} failed for {title}: {err}")
+                    if attempt < MAX_RETRIES - 1:
+                        delay = (
+                            RETRY_DELAY * (BACKOFF_MULTIPLIER**attempt)
+                            if is_403 and attempt < BACKOFF_MAX_ATTEMPTS
+                            else RETRY_DELAY
+                        )
+                        time.sleep(delay)
+                    else:
+                        err_msg = str(err)
+
+        # Clean up isolated temp dir regardless of success/failure
+        shutil.rmtree(worker_dir, ignore_errors=True)
+
+        zimm.logger.info(
+            f"[{sid}] [FINISHED] Singles - {artist} - {title} (status: {'ok' if err_msg is None else 'failed'})"
+        )
+
+        return {
+            "title": title,
+            "artist": artist,
+            "album": "Singles",
+            "track_number": None,
+            "status": "success" if err_msg is None else "failed",
+            "s3_path": s3_path,
+            "error": err_msg,
+        }
+
+    @staticmethod
     def _download_album_song_task(song, album, artist, thumbnail_path):
         """Pool-compatible wrapper for :meth:`download_album_song`."""
         return Zimmporter.download_album_song(song, album, artist, thumbnail_path, thread_id=threading.get_ident()) or {
@@ -565,6 +668,12 @@ class Zimmporter:
         return Zimmporter.download_playlist_song(
             song, album, artist, thumbnail_path, thread_id=threading.get_ident()
         ) or {"title": song["title"]}
+
+    @staticmethod
+    def _download_single_song_task(song, artist, thumbnail_path, year=None):
+        """Pool-compatible wrapper for :meth:`download_single_song`."""
+        result = Zimmporter.download_single_song(song, artist, thumbnail_path, year, thread_id=threading.get_ident())
+        return result or {"title": song["title"]}
 
     def _my_hook(self, d):
         """yt-dlp progress hook — logs a message when download finishes."""
