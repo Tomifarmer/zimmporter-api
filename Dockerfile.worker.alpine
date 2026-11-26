@@ -14,8 +14,11 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 COPY --from=deno /bin/deno /usr/libexec/deno
 COPY --from=deno /usr/local/lib/glibc/ /usr/local/lib/glibc/
 COPY --from=deno /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+# pip is not needed at runtime; removing it also drops pip's vendored
+# libraries (msgpack/setuptools/urllib3), which Trivy flags.
 RUN apk upgrade --no-cache && apk add --upgrade --no-cache expat && \
     rm /usr/local/bin/uv && \
+    rm -rf /usr/local/lib/python3.15/site-packages/pip /usr/local/lib/python3.15/site-packages/pip-*.dist-info && \
     apk add --no-cache ffmpeg && \
     addgroup -S zimmporter -g 51000 && \
     adduser -S -G zimmporter -u 51000 -h /zimmer zimmporter && \

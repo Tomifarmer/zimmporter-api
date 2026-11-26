@@ -11,8 +11,11 @@ RUN apt update && apt upgrade --no-install-recommends -y && \
 
 WORKDIR /zimmer/
 
+# Remove pip after installing dependencies: the runtime does not need it, and
+# pip's vendored libraries (msgpack/setuptools/urllib3) trigger Trivy findings.
 COPY requirements.txt requirements-base.txt ./
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt && \
+    rm -rf /usr/local/lib/python3.15/site-packages/pip /usr/local/lib/python3.15/site-packages/pip-*.dist-info
 
 COPY zimmporter/ ./zimmporter/
 COPY api/ ./api/
