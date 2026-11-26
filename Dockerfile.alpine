@@ -9,8 +9,11 @@ RUN uv pip install --system --no-cache -r requirements.txt && \
 FROM docker.io/python:3.15-alpine3.24
 COPY --from=builder /usr/local/lib/python3.15/site-packages/ /usr/local/lib/python3.15/site-packages/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
+# pip is not needed at runtime; removing it also drops pip's vendored
+# libraries (msgpack/setuptools/urllib3), which Trivy flags.
 RUN apk upgrade --no-cache && apk add --upgrade --no-cache expat && \
     rm /usr/local/bin/uv && \
+    rm -rf /usr/local/lib/python3.15/site-packages/pip /usr/local/lib/python3.15/site-packages/pip-*.dist-info && \
     addgroup -S zimmporter -g 51000 && \
     adduser -S -G zimmporter -u 51000 -h /zimmer zimmporter && \
     mkdir -p /etc/ssl/certs /data/zimmer/importer
